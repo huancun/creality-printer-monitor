@@ -16,7 +16,7 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -25,7 +25,7 @@ from .camera import BOUNDARY, CameraRelay
 from .go2rtc import go2rtc
 from .history import Tracker, parse_gcode_meta
 from .printer import Printer, derive_state, safe_gcode_name
-from .paths import CONFIG
+from .paths import CONFIG, MCP_TOKEN
 from .store import Store
 from . import mcp_server
 from mcp.server.transport_security import TransportSecuritySettings
@@ -33,7 +33,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 log = logging.getLogger("printermonitor")
 
 STATIC = Path(__file__).parent / "static"
-PASSWORD = os.environ.get("PM_PASSWORD", "")
+PASSWORD = os.environ.get("PM_PASSWORD", "")  # machine password (MCP, scripts): admin rights
 
 printers: dict[str, Printer] = {}
 cameras: dict[str, CameraRelay] = {}
@@ -134,7 +134,7 @@ def add_printer(pid: str, name: str, host: str, model: str | None = None, mac: s
 
 def get_printer(pid: str) -> Printer:
     if pid not in printers:
-        raise HTTPException(404, "unknown printer")
+        raise HTTPException(404, "未知打印机")
     return printers[pid]
 
 
@@ -202,6 +202,7 @@ async def lifespan(app: FastAPI):
 async def _lifespan_inner():
     global store, tracker, autooff
     store = Store()
+    _init_internal_token()
     tracker = Tracker(store, photo=take_photo, on_finish=on_print_finished)
     autooff = plugs.AutoOff(store.settings, printer_temp_state)
     config = load_config()
@@ -220,17 +221,102 @@ async def _lifespan_inner():
 app = FastAPI(title="Printer Monitor", lifespan=lifespan)
 
 
-# ---------- optional password (access from outside the local network) ----------
-def _authorized(header: str | None) -> bool:
-    if not PASSWORD:
-        return True
-    if not header or not header.startswith("Basic "):
-        return False
+# ---------- login: session cookie for the browser, Basic/token for machines ----------
+SESSION_COOKIE = "pm_session"
+SESSION_TTL = 30 * 86400  # seconds
+INTERNAL_TOKEN = ""  # machine token used by the MCP servers (see _init_internal_token)
+
+# Reachable without a session: the login page and its API.
+PUBLIC_PATHS = {
+    "/login", "/setup", "/favicon.ico",
+    "/api/auth/login", "/api/auth/setup", "/api/auth/need-setup",
+}
+
+# What a regular (read-only) user may GET: monitoring, jobs, temperature, recent
+# prints. Everything else in the API — settings, discovery, users, slicer… — is admin-only.
+_USER_GET_OK = (
+    r"^/api/printers(?:/|$)",  # list, camera, snapshot, thumb, temps, files
+    r"^/api/history(?:/|$)",   # recent prints and their media
+    r"^/api/stats$",
+    r"^/api/jobs/",
+    r"^/api/auth/me$",
+)
+
+
+def _user_get_allowed(path: str) -> bool:
+    if re.search(r"/(?:plug|maintenance)(?:/|$)", path):
+        return False  # smart plugs and maintenance are admin features
+    return any(re.match(p, path) for p in _USER_GET_OK)
+
+
+def _init_internal_token() -> None:
+    """Stable machine token stored next to the database, so the MCP servers (stdio
+    and in-process) can call the API without a browser session."""
+    global INTERNAL_TOKEN
+    token = ""
     try:
-        _, _, pw = base64.b64decode(header[6:]).decode().partition(":")
-    except Exception:
-        return False
-    return secrets.compare_digest(pw, PASSWORD)
+        if MCP_TOKEN.exists():
+            token = MCP_TOKEN.read_text(encoding="utf-8").strip()
+        if not token:
+            token = secrets.token_urlsafe(32)
+            MCP_TOKEN.parent.mkdir(parents=True, exist_ok=True)
+            MCP_TOKEN.write_text(token, encoding="utf-8")
+            try:
+                MCP_TOKEN.chmod(0o600)
+            except OSError:
+                pass
+    except OSError as e:
+        log.warning("cannot write %s (%s): the stdio MCP server will need PM_PASSWORD", MCP_TOKEN, e)
+    INTERNAL_TOKEN = token or secrets.token_urlsafe(32)
+
+
+# Failed logins: "ip|username" -> recent failure timestamps (brute-force protection).
+_login_fails: dict[str, list[float]] = {}
+
+
+def _fail_key(request: Request | WebSocket, username: str) -> str:
+    host = request.client.host if request.client else "?"
+    return f"{host}|{username.strip().lower()}"
+
+
+def _throttled(key: str, limit: int = 8, window: float = 900) -> bool:
+    now = time.time()
+    hits = [t for t in _login_fails.get(key, []) if now - t < window]
+    _login_fails[key] = hits
+    return len(hits) >= limit
+
+
+def _record_fail(key: str) -> None:
+    _login_fails.setdefault(key, []).append(time.time())
+
+
+def _identify(request: Request | WebSocket) -> dict[str, Any] | None:
+    """Who is calling: session cookie (browser), Basic auth (PM_PASSWORD machine
+    password or a database user) or the internal MCP token. None = not signed in."""
+    token = request.cookies.get(SESSION_COOKIE)
+    if token and store:
+        user = store.get_session(token)
+        if user:
+            return user
+    header = request.headers.get("authorization", "")
+    if header.startswith("Basic "):
+        try:
+            name, _, pw = base64.b64decode(header[6:]).decode("utf-8", "replace").partition(":")
+        except Exception:
+            name, pw = "", ""
+        if PASSWORD and secrets.compare_digest(pw, PASSWORD):
+            return {"username": name or "api", "role": "admin"}
+        if store and name:
+            key = _fail_key(request, name)
+            if not _throttled(key):
+                role = store.verify_user(name, pw)
+                if role:
+                    _login_fails.pop(key, None)
+                    return {"username": name, "role": role}
+                _record_fail(key)
+    if INTERNAL_TOKEN and secrets.compare_digest(request.headers.get("x-pm-token", ""), INTERNAL_TOKEN):
+        return {"username": "mcp", "role": "admin"}
+    return None
 
 
 @app.middleware("http")
@@ -244,10 +330,178 @@ async def mcp_no_slash(request: Request, call_next):
 
 
 @app.middleware("http")
-async def basic_auth(request: Request, call_next):
-    if not _authorized(request.headers.get("authorization")):
-        return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="printermonitor"'})
+async def auth_middleware(request: Request, call_next):
+    path = request.url.path
+    if path in PUBLIC_PATHS or path.startswith("/static/"):
+        return await call_next(request)
+    if path == "/mcp" or path.startswith("/mcp/"):
+        # The MCP transport is restricted to allowed hosts (TransportSecurity); the tool
+        # calls it makes back into the API authenticate with the internal token.
+        return await call_next(request)
+    ident = _identify(request)
+    if ident is None:
+        if request.method in ("GET", "HEAD") and not path.startswith("/api/"):
+            return RedirectResponse("/login", 303)
+        # Only challenge machines that actually sent credentials (browsers get the login page).
+        headers = {"WWW-Authenticate": 'Basic realm="printermonitor"'} if request.headers.get("authorization") else {}
+        return JSONResponse({"detail": "未登录或会话已过期"}, status_code=401, headers=headers)
+    if ident["role"] != "admin":
+        if request.method in ("GET", "HEAD"):
+            if path.startswith("/api/") and not _user_get_allowed(path):
+                return JSONResponse({"detail": "此功能仅管理员可用"}, status_code=403)
+        elif not path.startswith("/api/auth/"):
+            return JSONResponse({"detail": "普通用户为只读账户，无法执行此操作"}, status_code=403)
+    request.state.user = ident
     return await call_next(request)
+
+
+# ---------- login / account API ----------
+class LoginIn(BaseModel):
+    username: str
+    password: str
+
+
+class SetupIn(BaseModel):
+    username: str
+    password: str
+
+
+def _clean_username(name: str) -> str:
+    name = name.strip()
+    if not re.fullmatch(r"[\w.\-]{2,32}", name):
+        raise HTTPException(400, "用户名需为 2–32 个字符（中英文、数字、. - _）")
+    return name
+
+
+def _check_password(pw: str) -> None:
+    if len(pw) < 6:
+        raise HTTPException(400, "密码至少 6 位")
+
+
+def _login_response(request: Request, username: str, role: str) -> JSONResponse:
+    resp = JSONResponse({"username": username, "role": role})
+    secure = request.url.scheme == "https" or request.headers.get("x-forwarded-proto", "").split(",")[0].strip() == "https"
+    resp.set_cookie(SESSION_COOKIE, store.create_session(username), max_age=SESSION_TTL,
+                    path="/", httponly=True, samesite="lax", secure=secure)
+    return resp
+
+
+@app.get("/login")
+@app.get("/setup")
+async def page_login():
+    """The login page switches itself to "create the first admin" when there is no user yet."""
+    return FileResponse(STATIC / "login.html")
+
+
+@app.get("/api/auth/need-setup")
+async def api_need_setup():
+    return {"setup": store.count_users() == 0}
+
+
+@app.post("/api/auth/login")
+async def api_login(body: LoginIn, request: Request):
+    username = body.username.strip()
+    key = _fail_key(request, username)
+    if _throttled(key):
+        raise HTTPException(429, "尝试次数过多，请 15 分钟后再试")
+    role = store.verify_user(username, body.password) if username else None
+    if not role:
+        _record_fail(key)
+        raise HTTPException(401, "用户名或密码错误")
+    _login_fails.pop(key, None)
+    log.info("login: %s (%s)", username, role)
+    return _login_response(request, username, role)
+
+
+@app.post("/api/auth/setup")
+async def api_setup(body: SetupIn, request: Request):
+    """First run: create the admin account, then sign in."""
+    if store.count_users():
+        raise HTTPException(409, "管理员已创建，请直接登录")
+    username = _clean_username(body.username)
+    _check_password(body.password)
+    store.create_user(username, body.password, "admin")
+    log.info("first admin created: %s", username)
+    return _login_response(request, username, "admin")
+
+
+@app.get("/api/auth/me")
+async def api_me(request: Request):
+    ident = _identify(request)
+    if not ident:
+        raise HTTPException(401, "未登录")
+    return ident
+
+
+@app.post("/api/auth/logout")
+async def api_logout(request: Request):
+    if token := request.cookies.get(SESSION_COOKIE):
+        store.delete_session(token)
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(SESSION_COOKIE, path="/")
+    return resp
+
+
+# ---------- user management (admin) ----------
+class UserIn(BaseModel):
+    username: str
+    password: str
+    role: str = "user"
+
+
+class UserPatch(BaseModel):
+    password: str | None = None
+    role: str | None = None
+
+
+@app.get("/api/users")
+async def api_users():
+    return store.list_users()
+
+
+@app.post("/api/users")
+async def api_user_create(body: UserIn):
+    if body.role not in ("admin", "user"):
+        raise HTTPException(400, "角色无效")
+    username = _clean_username(body.username)
+    _check_password(body.password)
+    if store.get_user(username):
+        raise HTTPException(409, "用户名已存在")
+    store.create_user(username, body.password, body.role)
+    log.info("user created: %s (%s)", username, body.role)
+    return {"ok": True}
+
+
+@app.patch("/api/users/{username}")
+async def api_user_update(username: str, body: UserPatch):
+    user = store.get_user(username)
+    if not user:
+        raise HTTPException(404, "用户不存在")
+    if body.role is None and not body.password:
+        raise HTTPException(400, "没有要修改的内容")
+    if body.role is not None:
+        if body.role not in ("admin", "user"):
+            raise HTTPException(400, "角色无效")
+        if user["role"] == "admin" and body.role != "admin" and store.admin_count() <= 1:
+            raise HTTPException(400, "至少保留一名管理员")
+        store.set_role(username, body.role)
+    if body.password:
+        _check_password(body.password)
+        store.set_password(username, body.password)
+        store.delete_sessions(username)  # the user has to sign in again
+    return {"ok": True}
+
+
+@app.delete("/api/users/{username}")
+async def api_user_delete(username: str):
+    user = store.get_user(username)
+    if not user:
+        raise HTTPException(404, "用户不存在")
+    if user["role"] == "admin" and store.admin_count() <= 1:
+        raise HTTPException(400, "至少保留一名管理员")
+    store.delete_user(username)
+    log.info("user deleted: %s", username)
+    return {"ok": True}
 
 
 # ---------- API ----------
@@ -278,7 +532,7 @@ async def api_printers():
 async def api_add_printer(body: PrinterIn):
     host = body.host.strip().removeprefix("http://").rstrip("/")
     if not host:
-        raise HTTPException(400, "missing IP address")
+        raise HTTPException(400, "缺少 IP 地址")
     p = add_printer(uuid.uuid4().hex[:8], body.name.strip() or host, host)
     save_config()
     on_printer_update(p)
@@ -293,7 +547,7 @@ async def api_edit_printer(pid: str, body: PrinterEdit):
     if body.host is not None:
         host = body.host.strip().removeprefix("http://").rstrip("/")
         if not host:
-            raise HTTPException(400, "missing IP address")
+            raise HTTPException(400, "缺少 IP 地址")
         if host != p.host:
             if cam := cameras.pop(pid, None):
                 await cam.close()
@@ -390,7 +644,7 @@ async def api_files(pid: str):
     try:
         files = await get_printer(pid).list_files()
     except (RuntimeError, asyncio.TimeoutError) as e:
-        raise HTTPException(503, f"file list unavailable: {e or 'timed out'}")
+        raise HTTPException(503, f"无法获取文件列表：{e or '请求超时'}")
     keep = ("name", "file_size", "create_time", "timeCost", "consumables", "material", "floorHeight")
     files = [{k: f.get(k) for k in keep} for f in files]
     return sorted(files, key=lambda f: f.get("create_time") or 0, reverse=True)
@@ -434,7 +688,7 @@ async def api_camera(pid: str, request: Request):
         upstream = await client.send(client.build_request("GET", p.camera_url()), stream=True)
     except httpx.HTTPError:
         await client.aclose()
-        raise HTTPException(502, "camera unreachable")
+        raise HTTPException(502, "摄像头无法连接")
 
     async def body():
         try:
@@ -468,7 +722,7 @@ async def api_snapshot(pid: str):
         except httpx.HTTPError:
             jpeg = None
     if not jpeg:
-        raise HTTPException(503, "camera unavailable")
+        raise HTTPException(503, "摄像头不可用")
     return Response(jpeg, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
@@ -512,19 +766,19 @@ async def api_thumb(pid: str, name: str):
                 r = await c.get(url)
             png = r.content if r.status_code == 200 and r.content[:4] == b"\x89PNG" else None
         except httpx.HTTPError:
-            raise HTTPException(502, "printer unreachable")
+            raise HTTPException(502, "无法连接打印机")
         if len(thumbs) > 500:
             thumbs.clear()
         thumbs[url] = png
     if not thumbs[url]:
-        raise HTTPException(404, "no thumbnail")
+        raise HTTPException(404, "没有可用的缩略图")
     return Response(thumbs[url], media_type="image/png", headers={"Cache-Control": "max-age=3600"})
 
 
 @app.get("/api/jobs/{job_id}")
 async def api_job(job_id: str):
     if job_id not in jobs:
-        raise HTTPException(404, "unknown job")
+        raise HTTPException(404, "未知任务")
     return jobs[job_id]
 
 
@@ -549,7 +803,7 @@ async def api_history_delete(rec_id: int):
 @app.get("/api/history/media/{name}")
 async def api_history_media(name: str):
     if not re.fullmatch(r"\d+_(thumb\.png|photo\.jpg)", name) or not (store.media / name).exists():
-        raise HTTPException(404, "not found")
+        raise HTTPException(404, "未找到")
     return FileResponse(store.media / name, headers={"Cache-Control": "max-age=86400"})
 
 
@@ -615,14 +869,14 @@ async def api_plug_set(pid: str, body: PlugIn):
     p = get_printer(pid)
     cfg = store.settings()["plugs"].get(pid)
     if not cfg or not cfg.get("host"):
-        raise HTTPException(400, "no smart plug configured for this printer")
+        raise HTTPException(400, "此打印机尚未配置智能插座")
     if not body.on and derive_state(p.data, p.online) in plugs.BUSY:
-        raise HTTPException(409, "print in progress: the plug will not be switched off")
+        raise HTTPException(409, "打印正在进行中，无法关闭智能插座")
     autooff.cancel(pid)
     try:
         await plugs.set_state(cfg, body.on)
     except Exception as e:
-        raise HTTPException(502, f"smart plug unreachable: {e}")
+        raise HTTPException(502, f"无法连接智能插座：{e}")
     return {"ok": True}
 
 
@@ -662,9 +916,9 @@ async def api_slice(
     """Slice a 3D model; the G-code stays on the server for the preview and the upload."""
     filename = Path(file.filename or "model.stl").name
     if Path(filename).suffix.lower() not in MODEL_EXT:
-        raise HTTPException(400, "supported formats: .stl, .3mf, .obj, .step")
+        raise HTTPException(400, "支持的格式：.stl、.3mf、.obj、.step")
     if not slicer.find_binary():
-        raise HTTPException(400, "OrcaSlicer is not installed (Settings → Slicing).")
+        raise HTTPException(400, "尚未安装 OrcaSlicer（请前往“设置 → 切片”安装）。")
     workdir = slicer.new_workdir()
     src = workdir / re.sub(r"[^\w.\-()+]", "_", filename)
     with src.open("wb") as fh:
@@ -714,7 +968,7 @@ def _cleanup_sliced(max_age: float = 86400) -> None:
 async def api_sliced(token: str):
     path = sliced_dir() / f"{token}.gcode"
     if not re.fullmatch(r"[0-9a-f]{32}", token) or not path.exists():
-        raise HTTPException(404, "sliced file not found (expired?)")
+        raise HTTPException(404, "未找到切片文件（可能已过期）")
     return FileResponse(path, media_type="text/plain")
 
 
@@ -728,22 +982,22 @@ async def api_send(
     """Send a G-code (uploaded file, or sliced earlier) to one or more printers."""
     targets = [get_printer(pid) for pid in dict.fromkeys(x for x in printers_ids.split(",") if x)]
     if not targets:
-        raise HTTPException(400, "select at least one printer")
+        raise HTTPException(400, "请至少选择一台打印机。")
     workdir = slicer.new_workdir()
     if token:
         src = sliced_dir() / f"{token}.gcode"
         if not re.fullmatch(r"[0-9a-f]{32}", token) or not src.exists():
-            raise HTTPException(404, "sliced file not found (expired?)")
+            raise HTTPException(404, "未找到切片文件（可能已过期）")
         name = json.loads((sliced_dir() / f"{token}.json").read_text(encoding="utf-8"))["name"]
     elif file is not None:
         name = Path(file.filename or "file.gcode").name
         if Path(name).suffix.lower() != ".gcode":
-            raise HTTPException(400, "upload a .gcode, or slice the model first")
+            raise HTTPException(400, "请上传 .gcode 文件，或先对模型进行切片")
         src = workdir / "upload.gcode"
         with src.open("wb") as fh:
             shutil.copyfileobj(file.file, fh)
     else:
-        raise HTTPException(400, "no file")
+        raise HTTPException(400, "未选择文件")
     try:
         name = safe_gcode_name(name)
     except ValueError as e:
@@ -751,7 +1005,7 @@ async def api_send(
     if start:
         busy = [p.name for p in targets if derive_state(p.data, p.online) in plugs.BUSY or not p.online]
         if busy:
-            raise HTTPException(409, f"unavailable: {', '.join(busy)}")
+            raise HTTPException(409, f"以下打印机当前不可用：{', '.join(busy)}")
     job_id = uuid.uuid4().hex[:10]
     jobs[job_id] = {
         "id": job_id, "kind": "send", "file": name, "step": "uploading", "error": None, "start": start,
@@ -801,8 +1055,8 @@ async def api_upload(pid: str, file: UploadFile = File(...), start: bool = Form(
 
 @app.websocket("/api/ws")
 async def ws_endpoint(ws: WebSocket):
-    if not _authorized(ws.headers.get("authorization")):
-        # Browsers resend the Basic header on the same-origin WebSocket.
+    if _identify(ws) is None:
+        # Browsers resend the session cookie on the same-origin WebSocket.
         await ws.close(code=4401)
         return
     await ws.accept()

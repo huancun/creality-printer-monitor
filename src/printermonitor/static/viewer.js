@@ -23,21 +23,21 @@ import { STLLoader } from './vendor/three/addons/STLLoader.js';
 
 // Canonical keys (index = code sent by the worker), labels, colors.
 const FEATURES = [
-  { key: 'other',        label: 'Other',               color: '#cfd6e4' },
-  { key: 'outer',        label: 'Outer wall',          color: '#ff8a4c' },
-  { key: 'inner',        label: 'Inner wall',          color: '#ffd25c' },
-  { key: 'overhang',     label: 'Overhang wall',       color: '#4c8dff' },
-  { key: 'sparse',       label: 'Sparse infill',       color: '#c0504d' },
-  { key: 'solid',        label: 'Solid infill',        color: '#b05cff' },
-  { key: 'top',          label: 'Top surface',         color: '#ff5c7a' },
-  { key: 'bottom',       label: 'Bottom surface',      color: '#7aa9ff' },
-  { key: 'bridge',       label: 'Bridge',              color: '#4cc3ff' },
-  { key: 'gap',          label: 'Gap infill',          color: '#f2f2f2' },
-  { key: 'support',      label: 'Support',             color: '#34c38f' },
-  { key: 'supportIface', label: 'Support interface',   color: '#1f8f6a' },
-  { key: 'skirt',        label: 'Skirt / brim',        color: '#9bd17a' },
-  { key: 'prime',        label: 'Prime tower',         color: '#8d7bd6' },
-  { key: 'custom',       label: 'Custom',              color: '#7f889a' },
+  { key: 'other',        label: '其他',       color: '#cfd6e4' },
+  { key: 'outer',        label: '外墙',       color: '#ff8a4c' },
+  { key: 'inner',        label: '内墙',       color: '#ffd25c' },
+  { key: 'overhang',     label: '悬垂墙',     color: '#4c8dff' },
+  { key: 'sparse',       label: '稀疏填充',   color: '#c0504d' },
+  { key: 'solid',        label: '实心填充',   color: '#b05cff' },
+  { key: 'top',          label: '顶面',       color: '#ff5c7a' },
+  { key: 'bottom',       label: '底面',       color: '#7aa9ff' },
+  { key: 'bridge',       label: '桥接',       color: '#4cc3ff' },
+  { key: 'gap',          label: '间隙填充',   color: '#f2f2f2' },
+  { key: 'support',      label: '支撑',       color: '#34c38f' },
+  { key: 'supportIface', label: '支撑接触面', color: '#1f8f6a' },
+  { key: 'skirt',        label: '裙边 / brim', color: '#9bd17a' },
+  { key: 'prime',        label: '擦料塔',     color: '#8d7bd6' },
+  { key: 'custom',       label: '自定义',     color: '#7f889a' },
 ];
 
 // Orca / Bambu / Creality Print, PrusaSlicer, Cura names (lowercase) -> key.
@@ -331,7 +331,7 @@ const fmtInt = (v) => Number(v).toLocaleString(undefined);
 
 async function fetchOk(url) {
   const r = await fetch(url);
-  if (!r.ok) throw new Error(`Download failed (${r.status}): ${url}`);
+  if (!r.ok) throw new Error(`下载失败（${r.status}）：${url}`);
   return r;
 }
 
@@ -365,7 +365,7 @@ export class Viewer {
     try {
       this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     } catch (err) {
-      this._setMessage('WebGL is not available on this device.');
+      this._setMessage('此设备不支持 WebGL。');
       this.renderer = null;
       return;
     }
@@ -416,7 +416,7 @@ export class Viewer {
     this.$progress = el('div', 'pmv-progress');
     this.$progress.hidden = true;
     this.$progressBar = el('div', 'pmv-progress-bar');
-    this.$progressLabel = el('div', 'pmv-progress-label', 'Loading…');
+    this.$progressLabel = el('div', 'pmv-progress-label', '正在加载…');
     const track = el('div', 'pmv-progress-track');
     track.append(this.$progressBar);
     this.$progress.append(this.$progressLabel, track);
@@ -427,25 +427,25 @@ export class Viewer {
     this.$legend = el('div', 'pmv-legend');
     this.$legend.hidden = true;
 
-    this.$reset = el('button', 'pmv-btn pmv-reset', 'Recenter');
+    this.$reset = el('button', 'pmv-btn pmv-reset', '视图居中');
     this.$reset.type = 'button';
-    this.$reset.title = 'Recenter the view';
+    this.$reset.title = '将视图重新居中';
     this.$reset.addEventListener('click', () => this.frame(this._bounds || null));
 
     // Layer bar
     const bar = this.$layers = el('div', 'pmv-layers');
     bar.hidden = true;
-    this.$layerLabel = el('span', 'pmv-layer-label', 'Layer 0 / 0');
+    this.$layerLabel = el('span', 'pmv-layer-label', '图层 0 / 0');
     this.$slider = el('input', 'pmv-slider');
     this.$slider.type = 'range';
     this.$slider.min = '0'; this.$slider.max = '0'; this.$slider.step = '1'; this.$slider.value = '0';
-    this.$slider.setAttribute('aria-label', 'Displayed layer');
+    this.$slider.setAttribute('aria-label', '显示图层');
     this.$slider.addEventListener('input', () => this.setLayerRange(+this.$slider.value));
     const tgl = el('label', 'pmv-toggle');
     this.$travel = el('input');
     this.$travel.type = 'checkbox';
     this.$travel.addEventListener('change', () => this.setTravelVisible(this.$travel.checked));
-    tgl.append(this.$travel, el('span', null, 'Travel moves'));
+    tgl.append(this.$travel, el('span', null, '空驶路径'));
     const head = el('div', 'pmv-layers-head');
     head.append(this.$layerLabel, tgl);
     bar.append(head, this.$slider);
@@ -594,18 +594,18 @@ export class Viewer {
   /* ---------------- STL ---------------- */
 
   async loadSTL(source) {
-    if (!this.renderer) throw new Error('WebGL not available');
+    if (!this.renderer) throw new Error('WebGL 不可用');
     const token = this._clearModel();
-    this._setProgress(0, 'Loading STL…');
+    this._setProgress(0, '正在加载 STL…');
     try {
       let buf;
       if (source instanceof ArrayBuffer) buf = source;
       else if (ArrayBuffer.isView(source)) buf = source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength);
       else if (source instanceof Blob) buf = await source.arrayBuffer();
       else if (typeof source === 'string') buf = await (await fetchOk(source)).arrayBuffer();
-      else throw new Error('Unsupported STL source');
+      else throw new Error('不支持的 STL 数据源');
       if (token !== this._loadToken) return null;
-      this._setProgress(0.5, 'Parsing STL…');
+      this._setProgress(0.5, '正在解析 STL…');
       await new Promise((r) => setTimeout(r, 0));
 
       const geo = new STLLoader().parse(buf);
@@ -637,17 +637,17 @@ export class Viewer {
       const fits = size.x <= this.bed.x && size.y <= this.bed.y;
       this.info = { type: 'stl', size, triangles, fitsBed: fits };
       const lines = [
-        ['Dimensions', `${fmt(size.x)} × ${fmt(size.y)} × ${fmt(size.z)} mm`],
-        ['Triangles', fmtInt(triangles)],
+        ['尺寸', `${fmt(size.x)} × ${fmt(size.y)} × ${fmt(size.z)} mm`],
+        ['三角面数', fmtInt(triangles)],
       ];
-      if (!fits) lines.push(['Warning', 'exceeds the bed']);
+      if (!fits) lines.push(['警告', '模型超出热床范围']);
       this._setInfo(lines);
       this._bounds = geo.boundingBox.clone();
       this.frame(this._bounds);
       this._setProgress(1);
       return this.info;
     } catch (err) {
-      if (token === this._loadToken) this._setMessage(`Error: ${err.message || err}`);
+      if (token === this._loadToken) this._setMessage(`错误：${err.message || err}`);
       throw err;
     } finally {
       if (token === this._loadToken) this._setProgress(null);
@@ -657,9 +657,9 @@ export class Viewer {
   /* ---------------- G-code ---------------- */
 
   async loadGcode(source) {
-    if (!this.renderer) throw new Error('WebGL not available');
+    if (!this.renderer) throw new Error('WebGL 不可用');
     const token = this._clearModel();
-    this._setProgress(0, 'Loading G-code…');
+    this._setProgress(0, '正在加载 G-code…');
     const t0 = performance.now();
     try {
       const msg = {
@@ -672,25 +672,25 @@ export class Viewer {
       else if (source instanceof ArrayBuffer || ArrayBuffer.isView(source)) msg.blob = new Blob([source]);
       else if (typeof source === 'string' && /[\n\r]/.test(source)) msg.text = source;
       else if (typeof source === 'string') msg.blob = await this._fetchWithProgress(source, token);
-      else throw new Error('Unsupported G-code source');
+      else throw new Error('不支持的 G-code 数据源');
       if (token !== this._loadToken) return null;
       const tFetched = performance.now();
 
-      this._setProgress(0, 'Parsing G-code…');
+      this._setProgress(0, '正在解析 G-code…');
       const res = await new Promise((resolve, reject) => {
         const w = this._worker = makeWorker();
         w.onmessage = (ev) => {
           const d = ev.data;
-          if (d.kind === 'progress') { if (token === this._loadToken) this._setProgress(d.value, 'Parsing G-code…'); }
+          if (d.kind === 'progress') { if (token === this._loadToken) this._setProgress(d.value, '正在解析 G-code…'); }
           else if (d.kind === 'done') resolve(d);
           else if (d.kind === 'error') reject(new Error(d.message));
         };
-        w.onerror = (e) => reject(new Error(e.message || 'Worker error'));
+        w.onerror = (e) => reject(new Error(e.message || '工作线程错误'));
         w.postMessage(msg);
       });
       if (this._worker) { this._worker.terminate(); this._worker = null; }
       if (token !== this._loadToken) return null;
-      if (!res.layerStart.length) throw new Error('No extrusion found in this G-code');
+      if (!res.layerStart.length) throw new Error('此 G-code 中未找到挤出路径');
 
       this._buildGcode(res);
       const b = res.bounds;
@@ -703,15 +703,15 @@ export class Viewer {
         features: res.typesSeen.map((i) => FEATURES[i].key),
       };
       this._setInfo([
-        ['Dimensions', `${fmt(size.x)} × ${fmt(size.y)} × ${fmt(size.z)} mm`],
-        ['Layers', fmtInt(this.layerCount)],
-        ['Filament', `${fmt(res.filament / 1000, 2)} m`],
+        ['尺寸', `${fmt(size.x)} × ${fmt(size.y)} × ${fmt(size.z)} mm`],
+        ['图层数', fmtInt(this.layerCount)],
+        ['耗材长度', `${fmt(res.filament / 1000, 2)} m`],
       ]);
       this._buildLegend(res.typesSeen);
       this._setProgress(1);
       return this.info;
     } catch (err) {
-      if (token === this._loadToken) this._setMessage(`Error: ${err.message || err}`);
+      if (token === this._loadToken) this._setMessage(`错误：${err.message || err}`);
       throw err;
     } finally {
       if (token === this._loadToken) this._setProgress(null);
@@ -728,7 +728,7 @@ export class Viewer {
       const { done, value } = await reader.read();
       if (done) break;
       parts.push(value); got += value.length;
-      if (token === this._loadToken) this._setProgress(got / total * 0.5, 'Downloading G-code…');
+      if (token === this._loadToken) this._setProgress(got / total * 0.5, '正在下载 G-code…');
       else { reader.cancel(); break; }
     }
     return new Blob(parts);
@@ -774,7 +774,7 @@ export class Viewer {
 
   _buildLegend(typesSeen) {
     if (!typesSeen.length) {
-      this.$legend.replaceChildren(el('div', 'pmv-legend-title', 'Height'), el('div', 'pmv-gradient'));
+      this.$legend.replaceChildren(el('div', 'pmv-legend-title', '高度'), el('div', 'pmv-gradient'));
       this.$legend.hidden = false;
       return;
     }
@@ -806,8 +806,8 @@ export class Viewer {
     g.trv.geometry.setDrawRange(tStart * 2, Math.max(0, tEnd - tStart) * 2);
     if (+this.$slider.value !== max) this.$slider.value = String(max);
     const z = g.layerZ[max];
-    this.$layerLabel.textContent = `Layer ${max + 1} / ${N}`;
-    this.$layerLabel.title = `Z = ${fmt(z, 2)} mm`;
+    this.$layerLabel.textContent = `图层 ${max + 1} / ${N}`;
+    this.$layerLabel.title = `Z 高度 = ${fmt(z, 2)} mm`;
     this.$slider.style.setProperty('--pmv-fill', `${N > 1 ? (max / (N - 1)) * 100 : 100}%`);
     this.render();
   }
@@ -828,9 +828,9 @@ export class Viewer {
    * Rendered off-screen (dedicated renderer): the visible view is not modified.
    */
   async snapshot(size = 300) {
-    if (this._disposed) throw new Error('Viewer disposed');
+    if (this._disposed) throw new Error('查看器已关闭');
     const mesh = this._model && this._model.children.find((o) => o.isMesh);
-    if (!mesh) throw new Error('No STL loaded');
+    if (!mesh) throw new Error('尚未加载 STL 文件');
     size = Math.max(16, Math.round(size));
     const ss = size <= 128 ? 4 : 2;           // supersampling
     const px = size * ss;

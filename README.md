@@ -5,11 +5,10 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-26%20tools-8A2BE2)](https://modelcontextprotocol.io)
 [![Creality](https://img.shields.io/badge/Creality-Hi%20%7C%20K1%20%7C%20K2-1E90FF)](https://www.creality.com)
-[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](#docker)
 [![Platforms](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)](#requirements)
 
-A local web dashboard **and an MCP server** for Creality OS 3D printers (**Creality Hi, K1 family, K2 family**).
+A local web dashboard **and an MCP server** for Creality OS 3D printers (**Creality Hi, K1 family, K2 family, K3**).
 It talks to the printers directly on your LAN with the same protocol as Creality Print, with **no Creality cloud account**.
 
 - **Finds your printers on the network automatically**, and finds them again if your router gives them a new IP.
@@ -28,6 +27,7 @@ It talks to the printers directly on your LAN with the same protocol as Creality
 |----------------------------------|------------------|-------------------|
 | Creality Hi                      | ✅               | ✅ WebRTC (go2rtc) |
 | K2 / K2 Plus / K2 Pro            | ✅               | ✅ WebRTC (go2rtc) |
+| K3                               | ✅               | ✅ WebRTC (go2rtc) |
 | K1 / K1C / K1 SE / K1 Max        | ✅               | ✅ MJPEG           |
 | Other Creality OS printers (WebSocket on port 9999) | should work | depends on model |
 
@@ -35,7 +35,7 @@ Classic Marlin printers (Ender-3, Ender-3 V2…) have no network API and are not
 
 ## Requirements
 
-- Python **3.12+** and [uv](https://docs.astral.sh/uv/getting-started/installation/) (or Docker).
+- Python **3.12+** and pip (or Docker).
 - The computer running the app must be on the **same network** as the printers.
 - Linux, macOS or Windows. The camera gateway ([go2rtc](https://github.com/AlexxIT/go2rtc)) is downloaded automatically
   for your OS/CPU, with its checksum verified.
@@ -44,21 +44,24 @@ Classic Marlin printers (Ender-3, Ender-3 V2…) have no network API and are not
 
 ## Quick start
 
-Run it straight from GitHub, no clone needed:
-
-```bash
-uvx --from git+https://github.com/catmargiela/creality-printer-monitor printermonitor
-```
-
-Or from a clone:
+Install from a clone with pip:
 
 ```bash
 git clone https://github.com/catmargiela/creality-printer-monitor
 cd creality-printer-monitor
-uv run printermonitor
+python -m venv .venv
+# Linux / macOS:
+. .venv/bin/activate
+# Windows PowerShell:
+# .venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python run.py
 ```
 
 Open <http://localhost:8000> (or `http://<computer-ip>:8000` from a phone on the same Wi-Fi).
+
+The first time you open it, the app asks you to create the **admin account** (username + password). From then on
+you log in on the same page; the session stays valid for 30 days.
 
 On first launch the app **scans your local network** and adds every Creality printer it finds.
 You can add more later with **+ Printer** (by IP, or with the network scan).
@@ -104,10 +107,15 @@ In that case also allow that name: `PM_MCP_HOSTS=my-pc.local`.
 **stdio** (any MCP client, same machine):
 
 ```json
-{ "command": "uvx", "args": ["--from", "git+https://github.com/catmargiela/creality-printer-monitor", "printermonitor-mcp"] }
+{
+  "command": "/absolute/path/to/creality-printer-monitor/.venv/bin/python",
+  "args": ["/absolute/path/to/creality-printer-monitor/run_mcp.py"]
+}
 ```
 
-Set `PM_URL` if the app is not on `http://127.0.0.1:8000`, and `PM_PASSWORD` if you set one.
+On Windows, use `.venv\\Scripts\\python.exe` as the command.
+Set `PM_URL` if the app is not on `http://127.0.0.1:8000`. The local stdio server authenticates itself with the
+token file `data/.mcp-token` (created automatically on startup, same `PM_DATA_DIR`), so no password is needed.
 
 ### Tools
 
@@ -129,11 +137,30 @@ Example prompts: *"Is anything printing right now?"*, *"Take a picture of the K1
 Do **not** open a port on your router: the printers' API has no authentication.
 Use [Tailscale](https://tailscale.com) (or another VPN) on the computer running the app and on your phone,
 then open `http://<computer-name>:8000` from anywhere. Cameras go through the app too.
-You can also protect the app with a password (HTTP Basic auth, any username):
+You can also protect the app itself with login accounts (see [Accounts and roles](#accounts-and-roles)).
+Scripts and remote MCP clients can authenticate with HTTP Basic using `PM_PASSWORD`:
 
 ```bash
-PM_PASSWORD='change-me' uv run printermonitor
+PM_PASSWORD='change-me' python run.py
 ```
+
+## Accounts and roles
+
+The web UI has a login page backed by sessions stored in the SQLite database.
+
+- **First run**: opening `/` redirects to `/setup`, where you create the first **admin** account.
+- **管理员 (admin)**: everything — add/edit printers, uploads, controls, slicing, maintenance, smart plugs,
+  G-code console, history deletion, and **Settings → 用户管理** (create users, reset passwords, change roles).
+- **普通用户 (user)**: completely **read-only** and limited to: 监控 (monitoring), 耗材 (consumables),
+  打印任务 (jobs), 温度 (temperature) and 最近打印 (recent prints). Everything else returns `403` from the API
+  and is hidden in the UI.
+
+Manage users in **Settings → 用户管理**. Passwords are stored as salted PBKDF2 hashes; deleting or changing a
+user's password invalidates their sessions immediately.
+
+Machines do not use the login page: scripts, `curl` and remote MCP clients authenticate with HTTP Basic
+(`PM_PASSWORD` grants **admin** rights, any other username must match a database account) or with the header
+`X-PM-Token: <data/.mcp-token>`. The web session cookie never works for Basic-style API calls.
 
 ## Configuration
 
@@ -141,7 +168,7 @@ PM_PASSWORD='change-me' uv run printermonitor
 |-----------------------|-------------------------|---------|
 | `PM_PORT`             | `8000`                  | HTTP port |
 | `PM_HOST`             | `0.0.0.0`               | Listen address |
-| `PM_PASSWORD`         | *(none)*                | Password (HTTP Basic auth) for the UI, API and MCP |
+| `PM_PASSWORD`         | *(none)*                | Machine password (scripts, remote MCP): HTTP Basic auth, **admin** rights |
 | `PM_DATA_DIR`         | OS user data dir¹       | SQLite database, photos, go2rtc, OrcaSlicer |
 | `PM_CONFIG`           | `$PM_DATA_DIR/printers.json` | Printer list |
 | `PM_SCAN_SUBNET`      | auto (`/24` of the default interface) | Subnet to scan, e.g. `192.168.0.0/23` |

@@ -18,8 +18,8 @@ function resetSend() {
   $("#send-viewer").innerHTML = `<div class="viewer-empty">
     <label class="drop big" id="send-drop">
       <input type="file" id="send-file" accept=".gcode,.stl,.3mf,.obj,.step,.stp" hidden>
-      <span class="drop-title">Drop an .stl, .3mf or .gcode</span>
-      <span class="drop-sub">or click to choose a file</span>
+      <span class="drop-title">将 .stl、.3mf 或 .gcode 文件拖到此处</span>
+      <span class="drop-sub">或点击选择文件</span>
     </label></div>`;
   $("#send-meta").innerHTML = "";
   $("#send-slice").hidden = true;
@@ -47,13 +47,13 @@ function renderSendPrinters(preselect = []) {
   $("#send-printers").innerHTML = list.map((p) => {
     const busy = BUSY.has(p.state);
     const disabled = !p.online || (start && busy);
-    const why = !p.online ? "offline" : busy ? `${STATE_LABEL[p.state].toLowerCase()}${p.data?.printLeftTime ? ", available in " + dur(p.data.printLeftTime) : ""}` : STATE_LABEL[p.state].toLowerCase();
+    const why = !p.online ? "离线" : busy ? `${STATE_LABEL[p.state]}${p.data?.printLeftTime ? `，${dur(p.data.printLeftTime)} 后可用` : ""}` : STATE_LABEL[p.state];
     return `<label class="sp ${disabled ? "off" : ""}">
       <input type="checkbox" value="${esc(p.id)}" ${selected.has(p.id) && !disabled ? "checked" : ""} ${disabled ? "disabled" : ""}>
       <img src="${modelUrl(p)}" alt="" onerror="this.style.visibility='hidden'">
       <span><b>${esc(p.name)}</b><small>${esc(why)}</small></span>
     </label>`;
-  }).join("") || `<p class="muted small">No printers.</p>`;
+  }).join("") || `<p class="muted small">没有可用的打印机。</p>`;
   updateSendButton();
 }
 
@@ -66,14 +66,14 @@ function updateSendButton() {
   const ready = !!(send.token || (send.file && extOf(send.file.name) === "gcode"));
   const btn = $("#send-go");
   btn.disabled = !ready || !n || !!send.sendJob;
-  btn.textContent = !ready ? (send.file ? "Slice the model first" : "Choose a file")
-    : !n ? "Choose a printer"
-    : `${$("#send-start").checked ? "Print" : "Send"} to ${n} printer${n > 1 ? "s" : ""}`;
+  btn.textContent = !ready ? (send.file ? "请先切片" : "请选择文件")
+    : !n ? "请选择打印机"
+    : `${$("#send-start").checked ? "打印" : "发送"}到 ${n} 台打印机`;
 }
 
 async function viewerReady() {
   for (let i = 0; i < 50 && !window.PMViewer; i++) await new Promise((r) => setTimeout(r, 100));
-  if (!window.PMViewer) throw new Error("3D preview unavailable");
+  if (!window.PMViewer) throw new Error("3D 预览不可用");
   const box = $("#send-viewer");
   box.innerHTML = "";
   send.viewer?.dispose();
@@ -83,7 +83,7 @@ async function viewerReady() {
 
 async function handleSendFile(file) {
   const ext = extOf(file.name);
-  if (ext !== "gcode" && !MODEL_EXTS.includes(ext)) { toast("Supported formats: .stl, .3mf, .obj, .step, .gcode", true); return; }
+  if (ext !== "gcode" && !MODEL_EXTS.includes(ext)) { toast("支持的格式：.stl、.3mf、.obj、.step、.gcode", true); return; }
   send.file = file;
   send.token = null;
   $("#send-meta").innerHTML = `<span class="muted">${esc(file.name)} · ${(file.size / 1048576).toFixed(1)} MB</span>`;
@@ -101,13 +101,13 @@ async function handleSendFile(file) {
         const v = await viewerReady();
         await v.loadSTL(file);
         const s = v.info?.size;
-        $("#send-meta").innerHTML = `<span>${esc(file.name)}</span>${s ? ` · ${s.x.toFixed(1)} × ${s.y.toFixed(1)} × ${s.z.toFixed(1)} mm` : ""}${v.info?.fitsBed === false ? ` · <span class="perr inline-err">does not fit on the bed</span>` : ""}`;
+        $("#send-meta").innerHTML = `<span>${esc(file.name)}</span>${s ? ` · ${s.x.toFixed(1)} × ${s.y.toFixed(1)} × ${s.z.toFixed(1)} mm` : ""}${v.info?.fitsBed === false ? ` · <span class="perr inline-err">模型超出热床范围</span>` : ""}`;
       } else {
-        $("#send-viewer").innerHTML = `<div class="viewer-empty"><p class="muted">No preview before slicing for .${ext} files: slice it to see the result.</p></div>`;
+        $("#send-viewer").innerHTML = `<div class="viewer-empty"><p class="muted">.${ext} 文件切片前无法预览；完成切片后即可查看。</p></div>`;
       }
     }
   } catch (e) {
-    toast("Preview failed: " + e.message, true);
+    toast("预览失败：" + e.message, true);
   }
   updateSendButton();
 }
@@ -129,9 +129,9 @@ async function showGcodeMeta(meta, info) {
   $("#send-meta").innerHTML = [
     `<span>${esc(send.file?.name || "")}</span>`,
     meta.est_time_s && `⏱ ${dur(meta.est_time_s)}`,
-    meta.filament_g && `${meta.filament_g.toFixed(1)} g${meta.material ? " of " + esc(meta.material) : ""}`,
-    cost && `≈ ${cost.toLocaleString(undefined, { style: "currency", currency: "EUR" })} of filament`,
-    info?.layers && `${info.layers} layers`,
+    meta.filament_g && `${meta.filament_g.toFixed(1)} 克${meta.material ? " " + esc(meta.material) : ""}`,
+    cost && `耗材约 ${cost.toLocaleString("zh-CN", { style: "currency", currency: "EUR" })}`,
+    info?.layers && `${info.layers} 层`,
   ].filter(Boolean).join(" · ");
 }
 
@@ -158,8 +158,8 @@ async function fillCatalog() {
   if (!st.available || !c?.machine) {
     missing.hidden = false;
     missing.innerHTML = !st.available
-      ? `OrcaSlicer is not installed. <a href="#settings" onclick="document.querySelector('#send-dlg').close()">${st.can_install === false ? "See Settings" : "Install it from Settings"}</a>, or send a .gcode.`
-      : `No OrcaSlicer profiles for "${esc(model)}".`;
+      ? `尚未安装 OrcaSlicer。<a href="#settings" onclick="document.querySelector('#send-dlg').close()">${st.can_install === false ? "查看设置" : "前往设置安装"}</a>，或直接发送 .gcode 文件。`
+      : `没有适用于“${esc(model)}”的 OrcaSlicer 配置文件。`;
     $("#send-slice-btn").disabled = true;
     $("#send-process").innerHTML = $("#send-filament").innerHTML = "";
     return;
@@ -186,7 +186,7 @@ $("#send-slice-btn").onclick = async () => {
   if (!send.file) return;
   const btn = $("#send-slice-btn");
   btn.disabled = true;
-  btn.innerHTML = `<span class="spinner"></span> Slicing…`;
+  btn.innerHTML = `<span class="spinner"></span> 正在切片…`;
   const fd = new FormData();
   fd.append("file", send.file);
   fd.append("machine", send.catalogs.get($("#send-model").value)?.catalog?.machine || "");
@@ -206,7 +206,7 @@ $("#send-slice-btn").onclick = async () => {
   } catch (e) {
     toast(e.message, true);
     btn.disabled = false;
-    btn.textContent = "Slice";
+    btn.textContent = "开始切片";
   }
 };
 
@@ -216,22 +216,22 @@ window.addEventListener("pm:job", async (e) => {
     send.sliceJob = null;
     const btn = $("#send-slice-btn");
     btn.disabled = false;
-    btn.textContent = "Re-slice";
+    btn.textContent = "重新切片";
     if (job.step === "error") { toast(job.error, true); return; }
     send.token = job.token;
-    toast("Slicing complete ✓");
+    toast("切片完成 ✓");
     try {
       const v = await viewerReady();
       await v.loadGcode(`/api/sliced/${job.token}`);
       showGcodeMeta(job.meta || {}, v.info);
-    } catch (err) { toast("Preview failed: " + err.message, true); }
+    } catch (err) { toast("预览失败：" + err.message, true); }
     updateSendButton();
   }
   if (job.id === send.sendJob) renderSendStatus(job);
 });
 
 // ---------- sending ----------
-const SEND_STEP = { queued: "Queued", uploading: "Uploading…", starting: "Starting…", done: "OK", error: "Failed" };
+const SEND_STEP = { queued: "排队中", uploading: "上传中…", starting: "启动中…", done: "完成", error: "失败" };
 
 function renderSendStatus(job) {
   $("#send-status").innerHTML = Object.values(job.targets || {}).map((t) => `
@@ -244,7 +244,7 @@ function renderSendStatus(job) {
     send.sendJob = null;
     $("#send-go").hidden = true;
     $("#send-reset").hidden = false;
-    if (job.step === "done") toast(job.start ? "Print started ✓" : "File sent ✓");
+    if (job.step === "done") toast(job.start ? "已开始打印 ✓" : "文件已发送 ✓");
   }
 }
 
@@ -255,7 +255,7 @@ $("#send-go").onclick = async () => {
   if (send.token) fd.append("token", send.token);
   else fd.append("file", send.file);
   const ids = selectedPrinters();
-  if ($("#send-start").checked && !confirm(`Start printing on ${ids.map((id) => printers.get(id)?.name).join(", ")}?\nThe bed must be clear.`)) return;
+  if ($("#send-start").checked && !confirm(`确定在以下打印机上开始打印吗：${ids.map((id) => printers.get(id)?.name).join("、")}？\n请确保热床上没有物品。`)) return;
   try {
     const job = await api("/api/send", { method: "POST", body: fd });
     send.sendJob = job.id;

@@ -92,7 +92,7 @@ class CameraRelay:
             self._viewers -= 1
             self._last_viewer = time.monotonic()
 
-    async def snapshot(self, timeout: float = 6) -> bytes | None:
+    async def snapshot(self, timeout: float = FIRST_FRAME_TIMEOUT) -> bytes | None:
         """Latest frame (for thumbnails); keeps the session open for a while."""
         self._last_viewer = time.monotonic()
         self._ensure_running()

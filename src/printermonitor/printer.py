@@ -44,7 +44,14 @@ DROP_KEYS = {"retMaterials", "historyList", "elapseVideoList"}
 K1_MODELS = {"K1", "K1 SE", "K1C", "K1_CFS-C", "K1 Max"}
 
 # Internal codes returned by the firmware -> commercial names.
-MODEL_NAMES = {"F018": "Creality Hi", "F008": "K2 Plus", "F012": "K2 Pro", "F021": "K2", "F022": "SPARKX i7"}
+MODEL_NAMES = {
+    "F008": "K2 Plus",
+    "F012": "K2 Pro",
+    "F018": "Creality Hi",
+    "F021": "K2",
+    "F022": "SPARKX i7",
+    "F039": "K3",
+}
 
 # Only these keys may go through the generic command route.
 # `opGcodeFile` is deliberately excluded: it can rename or delete any file on

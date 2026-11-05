@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>3D Preview — demo</title>
+  <title>3D 预览 — 演示</title>
   <link rel="stylesheet" href="/static/viewer.css">
   <style>
     :root { --bg: #0b0d12; --surface: #151922; --border: #262c38; --text: #e8ebf1; --muted: #7f889a; --accent: #4c8dff; color-scheme: dark; }
@@ -23,10 +23,10 @@
 </head>
 <body>
   <div class="bar">
-    <label class="file">Open .stl / .gcode<input id="file" type="file" accept=".stl,.gcode,.gco,.g"></label>
-    <input id="url" type="text" placeholder="URL of an .stl or .gcode" spellcheck="false">
-    <button id="loadUrl" type="button">Load</button>
-    <button id="snap" type="button">Thumbnail</button>
+    <label class="file">打开 .stl / .gcode<input id="file" type="file" accept=".stl,.gcode,.gco,.g"></label>
+    <input id="url" type="text" placeholder=".stl 或 .gcode 文件的 URL" spellcheck="false">
+    <button id="loadUrl" type="button">加载</button>
+    <button id="snap" type="button">生成缩略图</button>
   </div>
   <div id="status"></div>
   <div id="view"></div>
@@ -36,15 +36,15 @@
     import { Viewer } from '/static/viewer.js';
     const status = document.getElementById('status');
     const v = new Viewer(document.getElementById('view'), {
-      onProgress: (f) => { status.textContent = `Loading… ${Math.round(f * 100)} %`; },
+      onProgress: (f) => { status.textContent = `正在加载… ${Math.round(f * 100)} %`; },
     });
     window.viewer = v;
     async function run(src, name) {
-      status.textContent = 'Loading…';
+      status.textContent = '正在加载…';
       try {
         const info = await v.load(src, name);
         status.textContent = info ? JSON.stringify(info) : '';
-      } catch (e) { status.textContent = 'Error: ' + e.message; console.warn(e); }
+      } catch (e) { status.textContent = '错误：' + e.message; console.warn(e); }
     }
     document.getElementById('file').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) run(f, f.name); });
     document.getElementById('loadUrl').addEventListener('click', () => { const u = document.getElementById('url').value.trim(); if (u) run(u, u); });
@@ -52,7 +52,7 @@
       try {
         const t = document.getElementById('thumbs'); t.replaceChildren();
         for (const s of [300, 96]) { const img = new Image(); img.src = await v.snapshot(s); t.append(img); }
-      } catch (e) { status.textContent = 'Error: ' + e.message; }
+      } catch (e) { status.textContent = '错误：' + e.message; }
     });
     const q = new URLSearchParams(location.search).get('src');
     if (q) { document.getElementById('url').value = q; run(q, q); }

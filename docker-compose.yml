@@ -4,6 +4,8 @@ services:
     # Host networking: needed to scan the LAN for printers and to reach their cameras (WebRTC).
     network_mode: host
     environment:
+      # Machine password for scripts / remote MCP clients (HTTP Basic, admin rights).
+      # The web UI uses its own login page instead — see README "Accounts and roles".
       # PM_PASSWORD: change-me
       PM_PORT: "8000"
     volumes:

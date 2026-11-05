@@ -1,10 +1,12 @@
-"""App data: print history, settings, maintenance (SQLite)."""
+"""App data: print history, settings, maintenance, users and sessions (SQLite)."""
 
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
+import secrets
 import sqlite3
 import time
 from pathlib import Path
@@ -29,11 +31,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "energy": {"price_kwh": 0.25, "power_w": 150},
     # Maintenance, in print hours.
     "maintenance": [
-        {"id": "bed", "name": "Clean the bed (isopropyl alcohol)", "hours": 20},
-        {"id": "lube", "name": "Lubricate the axes and rods", "hours": 100},
-        {"id": "belts", "name": "Check belt tension", "hours": 200},
-        {"id": "fans", "name": "Dust off the fans", "hours": 300},
-        {"id": "nozzle", "name": "Replace the nozzle", "hours": 500},
+        {"id": "bed", "name": "清洁热床（异丙醇）", "hours": 20},
+        {"id": "lube", "name": "润滑轴和杆", "hours": 100},
+        {"id": "belts", "name": "检查皮带张力", "hours": 200},
+        {"id": "fans", "name": "清理风扇灰尘", "hours": 300},
+        {"id": "nozzle", "name": "更换喷嘴", "hours": 500},
     ],
     # Smart plugs, by printer id:
     # {"type": "shelly2"|"shelly1"|"tasmota", "host": "192.168.1.50", "auto_off": true, "off_below": 50, "delay_min": 0}
@@ -73,7 +75,38 @@ CREATE TABLE IF NOT EXISTS maintenance (
     done_at REAL NOT NULL,
     PRIMARY KEY (printer_id, task_id)
 );
+CREATE TABLE IF NOT EXISTS users (
+    username TEXT PRIMARY KEY,
+    pw_hash TEXT NOT NULL,               -- pbkdf2_sha256$iterations$salt$hash
+    role TEXT NOT NULL,                  -- admin | user
+    created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sessions (
+    token TEXT PRIMARY KEY,
+    username TEXT NOT NULL,
+    expires_at REAL NOT NULL,
+    FOREIGN KEY (username) REFERENCES users(username) ON DELETE CASCADE
+);
 """
+
+PBKDF2_ITERATIONS = 200_000
+
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PBKDF2_ITERATIONS)
+    return f"pbkdf2_sha256${PBKDF2_ITERATIONS}${salt.hex()}${dk.hex()}"
+
+
+def verify_password(password: str, stored: str) -> bool:
+    try:
+        algo, iters, salt_hex, hash_hex = stored.split("$", 3)
+        if algo != "pbkdf2_sha256":
+            return False
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt_hex), int(iters))
+        return secrets.compare_digest(dk.hex(), hash_hex)
+    except (ValueError, TypeError):
+        return False
 
 
 class Store:
@@ -83,6 +116,7 @@ class Store:
         self.media.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(path or self.dir / "printermonitor.db", check_same_thread=False)
         self.db.row_factory = sqlite3.Row
+        self.db.execute("PRAGMA foreign_keys = ON")
         self.db.executescript(SCHEMA)
         self.db.commit()
 
@@ -203,4 +237,73 @@ class Store:
             "ON CONFLICT(printer_id, task_id) DO UPDATE SET done_hours = excluded.done_hours, done_at = excluded.done_at",
             (printer_id, task_id, self.print_hours(printer_id), time.time()),
         )
+        self.db.commit()
+
+    # ---------- users ----------
+    def count_users(self) -> int:
+        return int(self.db.execute("SELECT COUNT(*) FROM users").fetchone()[0])
+
+    def admin_count(self) -> int:
+        return int(self.db.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'").fetchone()[0])
+
+    def list_users(self) -> list[dict[str, Any]]:
+        rows = self.db.execute("SELECT username, role, created_at FROM users ORDER BY created_at").fetchall()
+        return [dict(r) for r in rows]
+
+    def get_user(self, username: str) -> dict[str, Any] | None:
+        row = self.db.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+        return dict(row) if row else None
+
+    def create_user(self, username: str, password: str, role: str) -> None:
+        self.db.execute(
+            "INSERT INTO users(username, pw_hash, role, created_at) VALUES(?, ?, ?, ?)",
+            (username, hash_password(password), role, time.time()),
+        )
+        self.db.commit()
+
+    def verify_user(self, username: str, password: str) -> str | None:
+        """Role of the user, or None if the credentials are wrong."""
+        user = self.get_user(username)
+        if not user or not verify_password(password, user["pw_hash"]):
+            return None
+        return user["role"]
+
+    def set_password(self, username: str, password: str) -> None:
+        self.db.execute("UPDATE users SET pw_hash = ? WHERE username = ?", (hash_password(password), username))
+        self.db.commit()
+
+    def set_role(self, username: str, role: str) -> None:
+        self.db.execute("UPDATE users SET role = ? WHERE username = ?", (role, username))
+        self.db.commit()
+
+    def delete_user(self, username: str) -> None:
+        self.delete_sessions(username)
+        self.db.execute("DELETE FROM users WHERE username = ?", (username,))
+        self.db.commit()
+
+    # ---------- sessions ----------
+    def create_session(self, username: str, ttl: float = 30 * 86400) -> str:
+        token = secrets.token_urlsafe(32)
+        self.db.execute("DELETE FROM sessions WHERE expires_at < ?", (time.time(),))
+        self.db.execute(
+            "INSERT INTO sessions(token, username, expires_at) VALUES(?, ?, ?)",
+            (token, username, time.time() + ttl),
+        )
+        self.db.commit()
+        return token
+
+    def get_session(self, token: str) -> dict[str, Any] | None:
+        row = self.db.execute(
+            "SELECT u.username, u.role FROM sessions s JOIN users u ON u.username = s.username "
+            "WHERE s.token = ? AND s.expires_at > ?",
+            (token, time.time()),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def delete_session(self, token: str) -> None:
+        self.db.execute("DELETE FROM sessions WHERE token = ?", (token,))
+        self.db.commit()
+
+    def delete_sessions(self, username: str) -> None:
+        self.db.execute("DELETE FROM sessions WHERE username = ?", (username,))
         self.db.commit()

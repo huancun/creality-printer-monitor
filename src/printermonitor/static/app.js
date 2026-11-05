@@ -9,14 +9,18 @@ let slicer = { available: false, profiles: [] };
 let files = [];
 const jobs = new Map();
 
+// signed-in user, filled in by boot() from /api/auth/me
+let ME = { username: null, role: "user" };
+const isAdmin = () => ME.role === "admin";
+
 const STATE_LABEL = {
-  offline: "Offline", idle: "Ready", printing: "Printing", paused: "Paused",
-  completed: "Completed", stopped: "Stopped", error: "Error", processing: "Preparing",
-  self_test: "Self-test",
+  offline: "离线", idle: "就绪", printing: "打印中", paused: "已暂停",
+  completed: "已完成", stopped: "已停止", error: "错误", processing: "准备中",
+  self_test: "自检中",
 };
 const STEP_LABEL = {
-  queued: "Queued", slicing: "Slicing…", uploading: "Uploading…",
-  starting: "Starting…", done: "Sent", error: "Failed",
+  queued: "排队中", slicing: "切片中…", uploading: "上传中…",
+  starting: "启动中…", done: "已发送", error: "失败",
 };
 const BUSY = new Set(["printing", "paused", "processing", "self_test"]);
 const ACTIVE = new Set([...BUSY, "completed"]);
@@ -28,15 +32,15 @@ const dur = (s) => {
   s = num(s);
   if (s === null || s < 0) return "—";
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
-  return h ? `${h}h ${String(m).padStart(2, "0")}m` : `${m} min`;
+  return h ? `${h} 小时 ${String(m).padStart(2, "0")} 分钟` : `${m} 分钟`;
 };
 const clock = (secondsFromNow) => {
   const s = num(secondsFromNow);
   if (s === null || s <= 0) return null;
   const end = new Date(Date.now() + s * 1000);
   const sameDay = end.toDateString() === new Date().toDateString();
-  const hm = end.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-  return sameDay ? hm : `tomorrow ${hm}`;
+  const hm = end.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  return sameDay ? hm : `明天 ${hm}`;
 };
 const progress = (d) => Math.max(0, Math.min(100, num(d.printProgress ?? d.dProgress) ?? 0));
 const baseName = (path) => String(path || "").split("/").pop();
@@ -73,7 +77,11 @@ async function api(path, opts = {}) {
     headers: opts.body && !(opts.body instanceof FormData) ? { "Content-Type": "application/json" } : undefined,
   });
   const body = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(body.detail || `Error ${r.status}`);
+  if (r.status === 401) {
+    location.href = "/login";
+    throw new Error("未登录");
+  }
+  if (!r.ok) throw new Error(body.detail || `错误 ${r.status}`);
   return body;
 }
 
@@ -145,11 +153,11 @@ function renderSummary() {
   const list = [...printers.values()];
   const count = (f) => list.filter(f).length;
   const chips = [
-    [count((p) => p.state === "printing" || p.state === "processing"), "printing"],
-    [count((p) => p.state === "paused"), "paused"],
-    [count((p) => p.state === "idle" || p.state === "completed"), "ready"],
-    [count((p) => p.state === "error" || p.error), "need attention"],
-    [count((p) => !p.online), "offline"],
+    [count((p) => p.state === "printing" || p.state === "processing"), "打印中"],
+    [count((p) => p.state === "paused"), "已暂停"],
+    [count((p) => p.state === "idle" || p.state === "completed"), "就绪"],
+    [count((p) => p.state === "error" || p.error), "需要处理"],
+    [count((p) => !p.online), "离线"],
   ].filter(([n]) => n);
   $("#summary").innerHTML = chips.map(([n, label]) => `<span class="chip"><b>${n}</b> ${label}</span>`).join("");
 }
@@ -208,28 +216,29 @@ function renderCard(p) {
       setThumb($(".thumb img", job), p.id, d.printFileName);
     }
     $(".fname", job).textContent = prettyName(d.printFileName);
-    $(".meta", job).textContent = p.state === "completed" ? "Completed"
-      : [eta && `done ~${eta}`, d.TotalLayer && `layer ${d.layer ?? 0}/${d.TotalLayer}`].filter(Boolean).join(" · ");
+    $(".meta", job).textContent = p.state === "completed" ? "已完成"
+      : [eta && `预计完成 ${eta}`, d.TotalLayer && `图层 ${d.layer ?? 0}/${d.TotalLayer}`].filter(Boolean).join(" · ");
     $(".pct", job).innerHTML = `${Math.round(progress(d))}<small>%</small>`;
   } else {
     job.dataset.key = "";
-    job.innerHTML = `<div class="info"><div class="meta">${p.online ? "No print in progress" : "Printer unreachable — " + esc(p.host)}</div></div>`;
+    job.innerHTML = `<div class="info"><div class="meta">${p.online ? "当前没有打印任务" : "无法连接打印机 — " + esc(p.host)}</div></div>`;
   }
 
   const fil = filaments(d)[0];
   $(".pfoot", el).innerHTML = p.online ? `
-    <span class="chip"><span class="tag-noz">Nozzle</span> ${deg(d.nozzleTemp)}${num(d.targetNozzleTemp) ? ` / ${deg(d.targetNozzleTemp)}` : ""}</span>
-    <span class="chip"><span class="tag-bed">Bed</span> ${deg(d.bedTemp0)}${num(d.targetBedTemp0) ? ` / ${deg(d.targetBedTemp0)}` : ""}</span>
+    <span class="chip"><span class="tag-noz">喷嘴</span> ${deg(d.nozzleTemp)}${num(d.targetNozzleTemp) ? ` / ${deg(d.targetNozzleTemp)}` : ""}</span>
+    <span class="chip"><span class="tag-bed">热床</span> ${deg(d.bedTemp0)}${num(d.targetBedTemp0) ? ` / ${deg(d.targetBedTemp0)}` : ""}</span>
     ${fil ? `<span class="chip"><span class="swatch" style="background:${fil.color}"></span>${esc(fil.type || fil.name)}</span>` : ""}` : "";
   $(".pfoot", el).insertAdjacentHTML("beforeend",
-    (p.maintenance_due ? `<span class="chip warn" title="Maintenance tasks due">🔧 Maintenance (${p.maintenance_due})</span>` : "") +
-    (p.plug_pending ? `<span class="chip" title="${esc(p.plug_pending)}">⏻ Power-off scheduled</span>` : ""));
+    (p.maintenance_due ? `<span class="chip warn" title="有维护项目到期">🔧 维护提醒 (${p.maintenance_due})</span>` : "") +
+    (p.plug_pending ? `<span class="chip" title="${esc(p.plug_pending)}">⏻ 已安排断电</span>` : ""));
   if (view === "printers") setCam($(".cam", el), p);
 }
 
 function renderEmpty() {
   if (printers.size) { $("#grid .empty")?.remove(); return; }
-  $("#grid").innerHTML = `<div class="empty"><h2>No printers</h2><p>Click "+ Printer" and enter the IP address shown on its screen.</p></div>`;
+  const hint = isAdmin() ? "点击“+ 添加打印机”，输入打印机屏幕上显示的 IP 地址。" : "暂无打印机，请联系管理员添加。";
+  $("#grid").innerHTML = `<div class="empty"><h2>尚未添加打印机</h2><p>${hint}</p></div>`;
 }
 
 // ---------- navigation ----------
@@ -238,7 +247,7 @@ let view = "printers";
 
 function route() {
   const h = decodeURIComponent(location.hash.slice(1));
-  const target = VIEWS.includes(h) ? h : "printers";
+  const target = VIEWS.includes(h) && (h !== "settings" || isAdmin()) ? h : "printers";
   if (target !== view || !route.done) showView(target);
   route.done = true;
   if (printers.has(h) && current !== h) openDetail(h);
@@ -294,16 +303,18 @@ function renderAlert(p) {
   box.className = "alert " + (e.level === "warning" ? "warning" : "");
   $("#d-alert-title").textContent = e.title;
   $("#d-alert-advice").textContent = e.advice;
-  $("#d-alert-code").textContent = `Code ${e.code}` + (e.official && e.official !== e.title ? ` · "${e.official}"` : "");
+  $("#d-alert-code").textContent = `错误代码 ${e.code}`;
   const actions = [];
-  if (e.resumable) {
-    actions.push(`<button class="btn primary sm" data-act="plr-resume">Resume print</button>`);
-    actions.push(`<button class="btn ghost sm" data-act="plr-cancel">Cancel</button>`);
-  } else if (p.state === "paused") {
-    actions.push(`<button class="btn primary sm" data-act="resume">Resume</button>`);
-    actions.push(`<button class="btn danger sm" data-act="stop">Stop</button>`);
+  if (isAdmin()) {
+    if (e.resumable) {
+      actions.push(`<button class="btn primary sm" data-act="plr-resume">恢复打印</button>`);
+      actions.push(`<button class="btn ghost sm" data-act="plr-cancel">取消</button>`);
+    } else if (p.state === "paused") {
+      actions.push(`<button class="btn primary sm" data-act="resume">继续打印</button>`);
+      actions.push(`<button class="btn danger sm" data-act="stop">停止</button>`);
+    }
+    if (!e.resumable) actions.push(`<button class="btn ghost sm" data-act="clear">忽略提醒</button>`);
   }
-  if (!e.resumable) actions.push(`<button class="btn ghost sm" data-act="clear">Dismiss alert</button>`);
   $("#d-alert-actions").innerHTML = actions.join("");
 }
 
@@ -314,7 +325,7 @@ function renderDetail() {
   $("#detail .panel").dataset.state = p.state;
   $("#d-name").textContent = p.name;
   $("#d-host").textContent = p.host;
-  $("#d-model").textContent = p.model || "unknown model";
+  $("#d-model").textContent = p.model || "未知型号";
   const mi = $("#d-model-img");
   if (mi.dataset.src !== modelUrl(p)) { mi.dataset.src = modelUrl(p); mi.hidden = false; mi.onerror = () => (mi.hidden = true); mi.src = modelUrl(p); }
   const pill = $("#d-state");
@@ -327,11 +338,11 @@ function renderDetail() {
   // Current job
   const active = ACTIVE.has(p.state) && d.printFileName;
   const pct = active ? progress(d) : 0;
-  $("#d-file").textContent = active ? prettyName(d.printFileName) : (p.online ? "No print in progress" : "Printer offline");
+  $("#d-file").textContent = active ? prettyName(d.printFileName) : (p.online ? "当前没有打印任务" : "打印机离线");
   setThumb($("#d-thumb"), p.id, active ? d.printFileName : "");
   const eta = active && p.state !== "completed" ? clock(d.printLeftTime) : null;
-  $("#d-eta").innerHTML = p.state === "completed" ? "Print completed"
-    : eta ? `Expected to finish at <b>${eta}</b> · ${dur(d.printLeftTime)} left` : "";
+  $("#d-eta").innerHTML = p.state === "completed" ? "打印已完成"
+    : eta ? `预计完成时间：<b>${eta}</b> · 剩余 ${dur(d.printLeftTime)}` : "";
   $("#d-pct").textContent = active ? Math.round(pct) : "—";
   $("#d-ring-fg").style.strokeDashoffset = 326.7 * (1 - pct / 100);
   $("#d-layer").textContent = active && d.TotalLayer ? `${d.layer ?? 0} / ${d.TotalLayer}` : "—";
@@ -343,7 +354,7 @@ function renderDetail() {
   $("#d-used").textContent = active && used ? (used >= 1000 ? `${(used / 1000).toFixed(2)} m` : `${Math.round(used)} mm`) : "—";
 
   const pause = $("#d-pause");
-  pause.textContent = p.state === "paused" ? "Resume" : "Pause";
+  pause.textContent = p.state === "paused" ? "继续打印" : "暂停";
   pause.disabled = !["printing", "paused"].includes(p.state);
   $("#d-stop").disabled = !BUSY.has(p.state);
   $("#d-light").setAttribute("aria-pressed", String(String(d.lightSw) === "1"));
@@ -352,17 +363,17 @@ function renderDetail() {
   // Temperatures
   $("#d-noz").textContent = deg(d.nozzleTemp);
   $("#d-bed").textContent = deg(d.bedTemp0);
-  $("#d-noz-t").textContent = num(d.targetNozzleTemp) ? `target ${deg(d.targetNozzleTemp)}` : "off";
-  $("#d-bed-t").textContent = num(d.targetBedTemp0) ? `target ${deg(d.targetBedTemp0)}` : "off";
+  $("#d-noz-t").textContent = num(d.targetNozzleTemp) ? `目标 ${deg(d.targetNozzleTemp)}` : "关闭";
+  $("#d-bed-t").textContent = num(d.targetBedTemp0) ? `目标 ${deg(d.targetBedTemp0)}` : "关闭";
 
   // Filament
   const fils = filaments(d);
   $("#d-filament").innerHTML = fils.length ? fils.map((f) => `
     <div class="fil">
       <span class="spool" style="background:${f.color}"></span>
-      <span class="txt"><b>${esc(f.name || f.type || "Filament")}</b><span>${esc([f.type, f.vendor, f.external ? "external spool" : `CFS ${f.box}·${f.id + 1}`].filter(Boolean).join(" · "))}${f.minTemp ? ` · ${f.minTemp}–${f.maxTemp} °C` : ""}</span></span>
+      <span class="txt"><b>${esc(f.name || f.type || "耗材")}</b><span>${esc([f.type, f.vendor, f.external ? "外置料盘" : `CFS ${f.box}·${f.id + 1}`].filter(Boolean).join(" · "))}${f.minTemp ? ` · ${f.minTemp}–${f.maxTemp} °C` : ""}</span></span>
       ${num(f.percent) !== null ? `<span class="gauge"><span class="bar"><div style="width:${num(f.percent)}%"></div></span></span>` : ""}
-    </div>`).join("") : `<span class="muted">${p.online ? "No filament information" : "—"}</span>`;
+    </div>`).join("") : `<span class="muted">${p.online ? "暂无耗材信息" : "—"}</span>`;
 
   for (const [i, field] of [[0, "modelFanPct"], [1, "caseFanPct"], [2, "auxiliaryFanPct"]]) {
     const r = $(`input[data-fan="${i}"]`);
@@ -382,6 +393,7 @@ function renderDetail() {
 
 // ---------- maintenance, plug, recent prints ----------
 async function loadMaintenance() {
+  if (!isAdmin()) return; // maintenance is an admin feature
   const id = current;
   try {
     const m = await api(`/api/printers/${id}/maintenance`);
@@ -390,25 +402,26 @@ async function loadMaintenance() {
 }
 
 function renderMaintenance(m) {
-  $("#d-hours").textContent = `${m.hours.toLocaleString(undefined)} print hours tracked`;
+  $("#d-hours").textContent = `已累计打印 ${m.hours.toLocaleString("zh-CN")} 小时`;
   $("#d-maint").innerHTML = m.tasks.map((t) => {
     const pct = Math.min(100, (t.since_hours / t.hours) * 100);
     return `<div class="mtask ${t.due ? "due" : ""}">
       <div class="mtop"><span>${esc(t.name)}</span>
-        <button class="btn sm ${t.due ? "primary" : "ghost"}" data-done="${esc(t.id)}" title="Mark as done now">Done</button></div>
+        <button class="btn sm ${t.due ? "primary" : "ghost"}" data-done="${esc(t.id)}" title="标记为已完成">完成</button></div>
       <div class="bar"><div style="width:${pct}%"></div></div>
-      <small class="muted">${t.due ? "Due" : `In ${Math.max(0, Math.round(t.hours - t.since_hours))} h`} · ${Math.round(t.since_hours)} / ${t.hours} h${t.done_at ? ` · done ${new Date(t.done_at * 1000).toLocaleDateString(undefined)}` : ""}</small>
+      <small class="muted">${t.due ? "已到期" : `${Math.max(0, Math.round(t.hours - t.since_hours))} 小时后`} · ${Math.round(t.since_hours)} / ${t.hours} 小时${t.done_at ? ` · 完成于 ${new Date(t.done_at * 1000).toLocaleDateString("zh-CN")}` : ""}</small>
     </div>`;
   }).join("");
 }
 $("#d-maint").addEventListener("click", async (e) => {
   const b = e.target.closest("[data-done]");
   if (!b) return;
-  try { renderMaintenance(await api(`/api/printers/${current}/maintenance/${b.dataset.done}`, { method: "POST" })); toast("Maintenance logged ✓"); }
+  try { renderMaintenance(await api(`/api/printers/${current}/maintenance/${b.dataset.done}`, { method: "POST" })); toast("已记录维护 ✓"); }
   catch (err) { toast(err.message, true); }
 });
 
 async function loadPlug() {
+  if (!isAdmin()) return; // smart plugs are an admin feature
   const id = current;
   let plug;
   try { plug = await api(`/api/printers/${id}/plug`); } catch { plug = { configured: false }; }
@@ -416,17 +429,17 @@ async function loadPlug() {
   $("#d-plug-card").hidden = !plug.configured;
   if (!plug.configured) return;
   const st = $("#d-plug-state");
-  st.textContent = !plug.reachable ? "Unreachable" : plug.on ? "On" : "Off";
+  st.textContent = !plug.reachable ? "无法连接" : plug.on ? "已开启" : "已关闭";
   st.dataset.state = !plug.reachable ? "error" : plug.on ? "idle" : "offline";
-  $("#d-plug-msg").textContent = plug.pending || (plug.auto_off ? `Auto power-off after printing, once the nozzle is below ${plug.off_below || 50} °C.` : "Auto power-off disabled (Settings).");
+  $("#d-plug-msg").textContent = plug.pending || (plug.auto_off ? `打印结束且喷嘴温度低于 ${plug.off_below || 50} °C 后自动断电。` : "自动断电已关闭（可在设置中启用）。");
 }
 setInterval(() => { if (current && !$("#d-plug-card").hidden) loadPlug(); }, 15000);
 $("#d-plug-on").onclick = () => setPlug(true);
 $("#d-plug-off").onclick = () => {
-  if (confirm("Cut power to the printer?")) setPlug(false);
+  if (confirm("确定要关闭打印机电源吗？")) setPlug(false);
 };
 async function setPlug(on) {
-  try { await api(`/api/printers/${current}/plug`, { method: "POST", body: JSON.stringify({ on }) }); toast(on ? "Plug turned on" : "Plug turned off"); }
+  try { await api(`/api/printers/${current}/plug`, { method: "POST", body: JSON.stringify({ on }) }); toast(on ? "插座已开启" : "插座已关闭"); }
   catch (e) { toast(e.message, true); }
   setTimeout(loadPlug, 800);
 }
@@ -444,14 +457,14 @@ async function loadRecent() {
 function renderCamStatus(p) {
   const c = p.camera_status || {};
   let text;
-  if (!p.online) text = "Printer offline";
-  else if (p.camera === "mjpeg") text = "Camera";
-  else if (c.status === "live") text = "Camera live";
-  else if (c.status === "connecting") text = "Connecting to camera…";
+  if (!p.online) text = "打印机离线";
+  else if (p.camera === "mjpeg") text = "摄像头";
+  else if (c.status === "live") text = "摄像头直播中";
+  else if (c.status === "connecting") text = "正在连接摄像头…";
   else if (c.status === "error") {
     const wait = c.retry_at ? Math.max(0, Math.round(c.retry_at - Date.now() / 1000)) : 0;
-    text = "Camera unavailable" + (wait ? ` — retrying in ${wait} s` : "");
-  } else text = "Camera idle";
+    text = "摄像头不可用" + (wait ? ` — ${wait} 秒后重试` : "");
+  } else text = "摄像头空闲";
   $("#cam-status").textContent = text;
   $("#cam-status").title = c.error || "";
   $("#cam-dot").className = "dot" + (c.status === "live" || p.camera === "mjpeg" ? " ok" : c.status === "connecting" ? " wait" : "");
@@ -472,7 +485,7 @@ setInterval(loadTemps, 10000);
 function drawChart(rows) {
   const svg = $("#chart");
   const W = 600, H = 160, now = Date.now() / 1000, span = 1800;
-  if (rows.length < 2) { svg.innerHTML = ""; $("#chart-labels").innerHTML = `<em>Readings will appear over the next few minutes…</em>`; return; }
+  if (rows.length < 2) { svg.innerHTML = ""; $("#chart-labels").innerHTML = `<em>温度记录将在几分钟后显示…</em>`; return; }
   const vals = rows.flatMap((r) => r.slice(1).filter((v) => v !== null));
   const top = Math.max(60, Math.ceil((Math.max(...vals) + 10) / 50) * 50);
   const x = (t) => Math.max(0, W - ((now - t) / span) * W);
@@ -497,7 +510,7 @@ function drawChart(rows) {
 // ---------- files ----------
 async function loadFiles() {
   const box = $("#files");
-  box.innerHTML = `<div class="note">Loading…</div>`;
+  box.innerHTML = `<div class="note">正在加载…</div>`;
   const id = current;
   try {
     const list = await api(`/api/printers/${id}/files`);
@@ -513,19 +526,20 @@ function renderFiles() {
   const q = $("#files-search").value.trim().toLowerCase();
   const list = files.filter((f) => !q || f.name.toLowerCase().includes(q));
   const box = $("#files");
-  if (!files.length) { box.innerHTML = `<div class="note">No files on the printer.</div>`; return; }
-  if (!list.length) { box.innerHTML = `<div class="note">No matching files.</div>`; return; }
+  if (!files.length) { box.innerHTML = `<div class="note">打印机上没有文件。</div>`; return; }
+  if (!list.length) { box.innerHTML = `<div class="note">没有匹配的文件。</div>`; return; }
   const busy = BUSY.has(printers.get(current)?.state);
+  const actions = isAdmin() ? `
+        <div class="factions">
+          <button class="btn sm primary" data-print="${esc(f.name)}" ${busy ? "disabled title='打印任务进行中'" : ""}>打印</button>
+          <button class="btn sm ghost" data-del="${esc(f.name)}" title="删除" aria-label="删除 ${esc(f.name)}">🗑</button>
+        </div>` : "";
   box.innerHTML = list.map((f) => `
     <div class="fcard">
       <div class="fthumb"><img loading="lazy" alt="" src="${thumbUrl(current, f.name)}" onerror="this.remove()"></div>
       <div class="fbody">
         <div class="fname" title="${esc(f.name)}">${esc(prettyName(f.name))}</div>
-        <div class="fmeta">${[f.timeCost && "⏱ " + dur(f.timeCost), f.material && esc(String(f.material).split(";")[0]), f.consumables && `${(f.consumables / 1000).toFixed(1)} m`].filter(Boolean).join(" · ")}</div>
-        <div class="factions">
-          <button class="btn sm primary" data-print="${esc(f.name)}" ${busy ? "disabled title='A print is in progress'" : ""}>Print</button>
-          <button class="btn sm ghost" data-del="${esc(f.name)}" title="Delete" aria-label="Delete ${esc(f.name)}">🗑</button>
-        </div>
+        <div class="fmeta">${[f.timeCost && "⏱ " + dur(f.timeCost), f.material && esc(String(f.material).split(";")[0]), f.consumables && `${(f.consumables / 1000).toFixed(1)} m`].filter(Boolean).join(" · ")}</div>${actions}
       </div>
     </div>`).join("");
 }
@@ -542,11 +556,11 @@ function renderJobs() {
 }
 
 function renderSlicer() {
-  $("#drop-slice").textContent = " · .stl / .3mf: slicing and 3D preview before sending";
+  $("#drop-slice").textContent = " · .stl / .3mf：发送前可切片并预览 3D 模型";
 }
 
 async function uploadFile(file) {
-  if (!current) return;
+  if (!current || !isAdmin()) return;
   const ext = file.name.split(".").pop().toLowerCase();
   if (ext !== "gcode") {
     // 3D model: slicing + preview in the send dialog
@@ -566,13 +580,16 @@ async function uploadFile(file) {
 // ---------- WebSocket to the server ----------
 function setLink(ok) {
   $("#link").classList.toggle("ok", ok);
-  $(".link-label").textContent = ok ? "Connected" : "Reconnecting…";
+  $(".link-label").textContent = ok ? "已连接" : "正在重连…";
 }
 
 function connect() {
   const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/ws`);
   ws.onopen = () => setLink(true);
-  ws.onclose = () => { setLink(false); setTimeout(connect, 2000); };
+  ws.onclose = (e) => {
+    if (e.code === 4401) { location.href = "/login"; return; } // session expired
+    setLink(false); setTimeout(connect, 2000);
+  };
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
     if (msg.type === "init") {
@@ -604,10 +621,10 @@ function connect() {
       if (msg.job.kind === "send") {
         if (msg.job.printer === current) renderJobs();
         if (msg.job.step === "done") {
-          toast(`${msg.job.gcode} sent ✓`);
+          toast(`${msg.job.gcode} 已发送 ✓`);
           if (current && msg.job.targets?.[current]) loadFiles();
         }
-        if (msg.job.step === "error") toast("Send failed: " + msg.job.error.split("\n")[0], true);
+        if (msg.job.step === "error") toast("发送失败：" + msg.job.error.split("\n")[0], true);
       }
     }
     renderSummary();
@@ -619,20 +636,24 @@ function connect() {
 function notifyChange(prev, p) {
   if (!prev) return;
   if (p.error && p.error.code !== prev.error?.code) toast(`${p.name}: ${p.error.title}`, true);
-  else if (p.state === "completed" && prev.state !== "completed") toast(`${p.name}: print completed ✓`);
+  else if (p.state === "completed" && prev.state !== "completed") toast(`${p.name}：打印已完成 ✓`);
 }
 
 // ---------- events ----------
+$("#logout-btn").onclick = async () => {
+  try { await api("/api/auth/logout", { method: "POST" }); } catch { /* already signed out */ }
+  location.href = "/login";
+};
 $("#d-close").onclick = () => closeDetail();
 $("#detail").addEventListener("click", (e) => { if (e.target.id === "detail") closeDetail(); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && current && !$("dialog[open]")) closeDetail(); });
 
 $("#d-pause").onclick = () => {
   const paused = printers.get(current)?.state === "paused";
-  command({ pause: paused ? 0 : 1 }, paused ? "Resume requested" : "Pause requested");
+  command({ pause: paused ? 0 : 1 }, paused ? "已请求继续打印" : "已请求暂停");
 };
 $("#d-stop").onclick = () => {
-  if (confirm("Stop the current print? It cannot be resumed.")) command({ stop: 1 }, "Stop requested");
+  if (confirm("确定停止当前打印吗？停止后无法继续。")) command({ stop: 1 }, "已请求停止");
 };
 $("#d-light").onclick = () => {
   const on = String(printers.get(current)?.data?.lightSw) === "1";
@@ -640,15 +661,15 @@ $("#d-light").onclick = () => {
 };
 $("#d-alert-actions").addEventListener("click", (e) => {
   const act = e.target.closest("[data-act]")?.dataset.act;
-  if (act === "resume") command({ pause: 0 }, "Resume requested");
-  else if (act === "stop") { if (confirm("Stop the print?")) command({ stop: 1 }, "Stop requested"); }
-  else if (act === "clear") command({ cleanErr: 1 }, "Alert dismissed");
-  else if (act === "plr-resume") command({ repoPlrStatus: 1 }, "Resuming interrupted print…");
-  else if (act === "plr-cancel") { if (confirm("Discard the interrupted print?")) command({ repoPlrStatus: 0 }, "Print discarded"); }
+  if (act === "resume") command({ pause: 0 }, "已请求继续打印");
+  else if (act === "stop") { if (confirm("确定停止打印吗？")) command({ stop: 1 }, "已请求停止"); }
+  else if (act === "clear") command({ cleanErr: 1 }, "提醒已清除");
+  else if (act === "plr-resume") command({ repoPlrStatus: 1 }, "正在恢复中断的打印…");
+  else if (act === "plr-cancel") { if (confirm("确定放弃中断的打印任务吗？")) command({ repoPlrStatus: 0 }, "已放弃打印任务"); }
 });
 $("#d-remove").onclick = async () => {
   const p = printers.get(current);
-  if (!confirm(`Remove "${p.name}" from the list?`)) return;
+  if (!confirm(`确定从列表中移除“${p.name}”吗？`)) return;
   try { await api(`/api/printers/${current}`, { method: "DELETE" }); } catch (e) { toast(e.message, true); }
 };
 $("#cam-reset").onclick = async () => {
@@ -656,15 +677,15 @@ $("#cam-reset").onclick = async () => {
   try {
     await api(`/api/printers/${id}/camera/reset`, { method: "POST" });
     for (const cam of camElements(id)) { stopCam(cam); setCam(cam, printers.get(id), cam === $("#d-cam").parentElement); }
-    toast("Camera reset, reconnecting…");
+    toast("摄像头已重置，正在重新连接…");
   } catch (e) { toast(e.message, true); }
 };
 $("#d-reboot").onclick = async () => {
   const p = printers.get(current);
-  if (!confirm(`Reboot "${p.name}"? It will be unavailable for about a minute.`)) return;
+  if (!confirm(`确定重启“${p.name}”吗？打印机将暂时离线约一分钟。`)) return;
   try {
     await api(`/api/printers/${current}/reboot`, { method: "POST" });
-    toast("Reboot requested.");
+    toast("已请求重启。");
   } catch (e) { toast(e.message, true); }
 };
 
@@ -672,7 +693,7 @@ function setTemps(noz, bed) {
   const params = {};
   if (noz !== null) params.nozzleTempControl = noz;
   if (bed !== null) params.bedTempControl = { num: 0, val: bed };
-  if (Object.keys(params).length) command(params, "Target sent");
+  if (Object.keys(params).length) command(params, "目标温度已发送");
 }
 $("#t-apply").onclick = () => { setTemps(num($("#t-noz").value), num($("#t-bed").value)); $("#t-noz").value = $("#t-bed").value = ""; };
 $$("[data-preset]").forEach((b) => (b.onclick = () => { const [n, p] = b.dataset.preset.split(",").map(Number); setTemps(n, p); }));
@@ -689,13 +710,13 @@ $$("[data-jog]").forEach((b) => (b.onclick = () => {
   const step = Number($('input[name="step"]:checked').value) * Number(dir);
   gcode(`G91\nG1 ${axis}${step} F${axis === "Z" ? 600 : 6000}\nG90`);
 }));
-$$("[data-home]").forEach((b) => (b.onclick = () => command({ autohome: b.dataset.home }, "Homing…")));
+$$("[data-home]").forEach((b) => (b.onclick = () => command({ autohome: b.dataset.home }, "正在归零…")));
 
 $("#gcode-form").onsubmit = (e) => {
   e.preventDefault();
   const v = $("#gcode").value.trim();
   if (!v) return;
-  gcode(v, "Sent: " + v);
+  gcode(v, "已发送：" + v);
   $("#gcode").value = "";
 };
 
@@ -706,11 +727,11 @@ $("#files").addEventListener("click", async (e) => {
   const del = e.target.closest("[data-del]");
   try {
     if (pr) {
-      if (!confirm(`Start printing ${pr.dataset.print}?`)) return;
+      if (!confirm(`开始打印 ${pr.dataset.print} 吗？`)) return;
       await api(`/api/printers/${current}/print`, { method: "POST", body: JSON.stringify({ name: pr.dataset.print }) });
-      toast("Print started");
+      toast("已开始打印");
     } else if (del) {
-      if (!confirm(`Delete ${del.dataset.del} from the printer?`)) return;
+      if (!confirm(`从打印机中删除 ${del.dataset.del} 吗？`)) return;
       await api(`/api/printers/${current}/delete`, { method: "POST", body: JSON.stringify({ name: del.dataset.del }) });
       setTimeout(loadFiles, 800);
     }
@@ -739,20 +760,20 @@ $("#add-dlg").addEventListener("close", async () => {
 $("#discover-btn").onclick = async () => {
   const btn = $("#discover-btn"), list = $("#discover-list");
   btn.disabled = true;
-  btn.innerHTML = `<span class="spinner"></span> Scanning the network…`;
+  btn.innerHTML = `<span class="spinner"></span> 正在扫描网络…`;
   list.innerHTML = "";
   try {
     const found = await api("/api/discover");
     list.innerHTML = found.length ? found.map((f) => `
       <div class="disc">
         <img src="/static/models/${encodeURIComponent(f.model || "x")}.webp" alt="" onerror="this.style.visibility='hidden'">
-        <span class="txt"><b>${esc(f.model_name || "Creality printer")}</b><span>${esc(f.host)}${f.mac ? " · " + esc(f.mac.slice(-4)) : ""}</span></span>
-        ${f.known_id ? `<span class="muted small">already added${f.known_name ? " (" + esc(f.known_name) + ")" : ""}</span>`
-          : `<button type="button" class="btn sm primary" data-add="${esc(f.host)}" data-name="${esc((f.model_name || "Creality") + (f.mac ? " " + f.mac.slice(-4) : ""))}">Add</button>`}
+        <span class="txt"><b>${esc(f.model_name || "创想打印机")}</b><span>${esc(f.host)}${f.mac ? " · " + esc(f.mac.slice(-4)) : ""}</span></span>
+        ${f.known_id ? `<span class="muted small">已添加${f.known_name ? "（" + esc(f.known_name) + "）" : ""}</span>`
+          : `<button type="button" class="btn sm primary" data-add="${esc(f.host)}" data-name="${esc((f.model_name || "Creality") + (f.mac ? " " + f.mac.slice(-4) : ""))}">添加</button>`}
       </div>`).join("") : `<p class="muted small">No Creality printer found. Make sure it is powered on and connected to the same network.</p>`;
   } catch (e) { list.innerHTML = `<p class="muted small">${esc(e.message)}</p>`; }
   btn.disabled = false;
-  btn.textContent = "Scan again";
+  btn.textContent = "重新扫描";
 };
 $("#discover-list").addEventListener("click", async (e) => {
   const b = e.target.closest("[data-add]");
@@ -768,7 +789,7 @@ $("#d-edit").onclick = () => {
   const p = printers.get(current), form = $("#edit-form");
   form.name.value = p.name;
   form.host.value = p.host;
-  $("#edit-mac").textContent = p.mac ? `MAC address ${p.mac}: if your router changes its IP address, the app finds it again automatically.` : "";
+  $("#edit-mac").textContent = p.mac ? `MAC 地址 ${p.mac}：如果路由器更改了打印机 IP，应用会自动重新发现它。` : "";
   $("#edit-dlg").showModal();
 };
 $("#edit-dlg").addEventListener("close", async () => {
@@ -777,12 +798,33 @@ $("#edit-dlg").addEventListener("close", async () => {
   try {
     await api(`/api/printers/${current}`, { method: "PATCH", body: JSON.stringify(data) });
     stopCam($("#d-cam").parentElement);
-    toast("Printer updated");
+    toast("打印机信息已更新");
   } catch (e) { toast(e.message, true); }
 });
 
 // keep finish times accurate even without new messages
 setInterval(() => { for (const p of printers.values()) renderCard(p); if (current) renderDetail(); }, 30000);
 
-api("/api/slicer").then((s) => { slicer = s; renderSlicer(); }).catch(renderSlicer);
-connect();
+// ---------- start: who am I, then connect ----------
+function applyRole() {
+  if (isAdmin()) return;
+  $$(`[data-admin]`).forEach((el) => (el.hidden = true));
+}
+
+async function boot() {
+  try {
+    ME = await api("/api/auth/me");
+  } catch {
+    return; // api() already redirected to /login
+  }
+  document.body.dataset.role = ME.role;
+  const who = $("#who");
+  who.textContent = `${ME.username} · ${isAdmin() ? "管理员" : "普通用户"}`;
+  who.hidden = false;
+  applyRole();
+  if (isAdmin()) {
+    api("/api/slicer").then((s) => { slicer = s; renderSlicer(); }).catch(renderSlicer);
+  }
+  connect();
+}
+boot();

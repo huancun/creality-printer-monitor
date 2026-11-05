@@ -4,7 +4,7 @@ It goes through the app's HTTP API (a single connection per printer, and all of
 the app's features: camera, slicing, history, clear error messages).
 
 Two ways to use it:
-  - stdio: `printermonitor-mcp` (PM_URL variable if the app is not on localhost:8000);
+  - stdio: `python run_mcp.py` (PM_URL variable if the app is not on localhost:8000);
   - network: the app serves it itself on http://<ip>:8000/mcp/ (Streamable HTTP).
 """
 
@@ -23,6 +23,8 @@ import httpx
 from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError  # the only error type whose message is shown to Claude
 from mcp.types import ToolAnnotations
+
+from .paths import MCP_TOKEN
 
 READ = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
 ACT = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False)
@@ -56,15 +58,27 @@ class Client:
         password = os.environ.get("PM_PASSWORD", "")
         self.auth = ("mcp", password) if password else None
 
+    def _headers(self) -> dict[str, str] | None:
+        """Without PM_PASSWORD, authenticate with the machine token file the app
+        writes at startup (same machine). Read lazily: the file is created on
+        the first run after this module is imported."""
+        if self.auth:
+            return None
+        try:
+            token = MCP_TOKEN.read_text(encoding="utf-8").strip() if MCP_TOKEN.exists() else ""
+        except OSError:
+            token = ""
+        return {"X-PM-Token": token} if token else None
+
     def _client(self, timeout: float = 30) -> httpx.AsyncClient:
-        return httpx.AsyncClient(base_url=self.base, auth=self.auth, timeout=timeout)
+        return httpx.AsyncClient(base_url=self.base, auth=self.auth, headers=self._headers(), timeout=timeout)
 
     async def request(self, method: str, path: str, timeout: float = 30, **kw: Any) -> Any:
         try:
             async with self._client(timeout) as c:
                 r = await c.request(method, path, **kw)
         except httpx.ConnectError:
-            raise ToolError(f"Printer Monitor unreachable at {self.base}: is the app running (uv run printermonitor)?")
+            raise ToolError(f"Printer Monitor unreachable at {self.base}: is the app running (python run.py)?")
         if r.status_code >= 400:
             try:
                 detail = r.json().get("detail")
