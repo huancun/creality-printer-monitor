@@ -32,7 +32,11 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 log = logging.getLogger("printermonitor")
 
-STATIC = Path(__file__).parent / "static"
+# Built React frontend (frontend/dist), overridable for deployments that build
+# the UI elsewhere. Falls back to <repo>/frontend/dist in a source checkout.
+# The 3D viewer, printer model images and vendored three.js live in
+# frontend/public/ and are copied into dist/ by the Vite build.
+FRONTEND = Path(os.environ.get("PM_FRONTEND_DIST") or Path(__file__).resolve().parents[2] / "frontend" / "dist")
 PASSWORD = os.environ.get("PM_PASSWORD", "")  # machine password (MCP, scripts): admin rights
 
 printers: dict[str, Printer] = {}
@@ -183,7 +187,7 @@ def _mcp_allowed_hosts() -> list[str]:
     return sorted(f"{h}:*" for h in hosts) + sorted(hosts)
 
 
-mcp = mcp_server.build(mcp_server.Client(f"http://127.0.0.1:{os.environ.get('PM_PORT', '8000')}"))
+mcp = mcp_server.build(mcp_server.Client(f"http://127.0.0.1:{os.environ.get('PM_PORT', '8010')}"))
 mcp_http = mcp.streamable_http_app(
     streamable_http_path="/",
     transport_security=TransportSecuritySettings(allowed_hosts=_mcp_allowed_hosts(), allowed_origins=[]),
@@ -332,7 +336,9 @@ async def mcp_no_slash(request: Request, call_next):
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
-    if path in PUBLIC_PATHS or path.startswith("/static/"):
+    # Frontend static assets (bundles, 3D viewer, model images, vendored three.js)
+    # are public so the login page can load without a session.
+    if path in PUBLIC_PATHS or path.startswith(("/assets/", "/models/", "/vendor/")) or path in ("/viewer.js", "/viewer.css"):
         return await call_next(request)
     if path == "/mcp" or path.startswith("/mcp/"):
         # The MCP transport is restricted to allowed hosts (TransportSecurity); the tool
@@ -386,11 +392,19 @@ def _login_response(request: Request, username: str, role: str) -> JSONResponse:
     return resp
 
 
+def _spa_page() -> FileResponse:
+    """The React single-page app: /login and /setup are rendered by the frontend itself."""
+    index = FRONTEND / "index.html"
+    if not index.exists():
+        raise HTTPException(503, "前端未构建：请在 frontend/ 目录运行 npm install && npm run build")
+    return FileResponse(index)
+
+
 @app.get("/login")
 @app.get("/setup")
 async def page_login():
     """The login page switches itself to "create the first admin" when there is no user yet."""
-    return FileResponse(STATIC / "login.html")
+    return _spa_page()
 
 
 @app.get("/api/auth/need-setup")
@@ -1073,8 +1087,10 @@ async def ws_endpoint(ws: WebSocket):
 
 @app.get("/")
 async def index():
-    return FileResponse(STATIC / "index.html")
+    return _spa_page()
 
 
 app.mount("/mcp", mcp_http)
-app.mount("/static", StaticFiles(directory=STATIC), name="static")
+# Everything else in dist/ (assets/, models/, viewer.js, vendor/, …) — registered
+# last so the API routes above always win.
+app.mount("/", StaticFiles(directory=FRONTEND, check_dir=False), name="frontend")

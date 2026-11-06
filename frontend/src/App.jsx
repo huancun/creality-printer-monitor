@@ -634,7 +634,7 @@ function App() {
               {discoverResults !== null && !discoverResults.length && <p className="text-[10px] leading-relaxed text-muted">未发现打印机，请确认设备已开机且与本机在同一网络。</p>}
               {discoverResults?.map((item) => (
                 <div key={`${item.mac || ""}-${item.host}`} className="flex items-center gap-2 rounded-lg border border-line bg-panel px-2.5 py-2">
-                  <img src={`/static/models/${encodeURIComponent(item.model || "x")}.webp`} alt="" className="h-7 w-7 rounded object-contain" onError={(event) => { event.currentTarget.style.visibility = "hidden"; }} />
+                  <img src={`/models/${encodeURIComponent(item.model || "x")}.webp`} alt="" className="h-7 w-7 rounded object-contain" onError={(event) => { event.currentTarget.style.visibility = "hidden"; }} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[11px] text-white">{item.model_name || "创想打印机"}</div>
                     <div className="text-[9px] text-muted">{item.host}{item.mac ? ` · ${item.mac.slice(-4)}` : ""}</div>

@@ -199,7 +199,9 @@ The app speaks the local protocol used by Creality Print / OrcaSlicer:
 
 Code layout (`src/printermonitor/`): `printer.py` (printer connection), `server.py` (web API), `mcp_server.py` (MCP tools),
 `discovery.py` (network scan), `camera.py` + `go2rtc.py` (camera relay), `slicer.py` (OrcaSlicer), `history.py` + `store.py`
-(history, settings, SQLite), `plugs.py` (smart plugs), `errors.py` (error messages), `static/` (web UI, three.js 3D viewer).
+(history, settings, SQLite), `plugs.py` (smart plugs), `errors.py` (error messages). The web UI is the React
+app in `frontend/` (3D viewer and model images in `frontend/public/`); build it once with
+`cd frontend && npm install && npm run build` before starting the server — Docker builds it automatically.
 
 ### Camera notes
 

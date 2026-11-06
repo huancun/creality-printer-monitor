@@ -1,6 +1,6 @@
-// Lazy-loads the standalone3D viewer served by the Python backend
-// (/static/viewer.js). It is a plain ES module that sets `window.PMViewer`,
-// so a <script type="module"> tag works in dev (Vite proxy) and in production.
+// Lazy-loads the standalone 3D viewer from the Vite public directory
+// (/viewer.js). It is a plain ES module that sets `window.PMViewer`,
+// so a <script type="module"> tag works in dev and in production.
 let pending = null;
 
 export function loadViewer() {
@@ -11,12 +11,12 @@ export function loadViewer() {
       const link = document.createElement("link");
       link.id = "pm-viewer-css";
       link.rel = "stylesheet";
-      link.href = "/static/viewer.css";
+      link.href = "/viewer.css";
       document.head.appendChild(link);
     }
     const script = document.createElement("script");
     script.type = "module";
-    script.src = "/static/viewer.js";
+    script.src = "/viewer.js";
     script.onload = () => {
       if (window.PMViewer) resolve(window.PMViewer);
       else {

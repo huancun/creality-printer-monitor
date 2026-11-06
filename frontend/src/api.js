@@ -115,7 +115,7 @@ export const prettyName = (name) => baseName(name).replace(/\.gcode$/i, "").repl
 
 export const thumbUrl = (id, name) => `/api/printers/${id}/thumb?name=${encodeURIComponent(baseName(name))}`;
 
-export const modelUrl = (printer) => `/static/models/${encodeURIComponent(printer.model_code || "unknown")}.webp`;
+export const modelUrl = (printer) => `/models/${encodeURIComponent(printer.model_code || "unknown")}.webp`;
 
 export const mediaUrl = (name) => `/api/history/media/${encodeURIComponent(name)}`;
 

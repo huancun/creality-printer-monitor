@@ -20,5 +20,5 @@ def main() -> None:
         # are running (camera video decoding). Reproduced on 2026-10-08.
         loop="asyncio",
         host=os.environ.get("PM_HOST", "0.0.0.0"),
-        port=int(os.environ.get("PM_PORT", "8000")),
+        port=int(os.environ.get("PM_PORT", "8010")),
     )

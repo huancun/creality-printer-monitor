@@ -10,10 +10,6 @@ export default defineConfig({
         changeOrigin: true,
         ws: true,
       },
-      "/static": {
-        target: process.env.PM_API_TARGET || "http://127.0.0.1:8010",
-        changeOrigin: true,
-      },
     },
   },
 });
