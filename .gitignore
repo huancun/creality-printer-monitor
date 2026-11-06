@@ -7,3 +7,4 @@ build/
 # Local data when PM_DATA_DIR / PM_CONFIG point inside the checkout
 data/
 printers.json
+node_modules

@@ -204,7 +204,7 @@
           <div class="card">
             <div class="card-head">
               <h3>温度</h3>
-              <div class="legend"><span class="lg noz">喷嘴</span><span class="lg bed">热床</span><span class="lg tgt">目标</span></div>
+              <div id="chart-legend" class="legend"><span class="lg noz">喷嘴</span><span class="lg bed">热床</span><span class="lg tgt">目标</span></div>
             </div>
             <div class="temps-now">
               <div class="tnow noz"><span class="label">喷嘴</span><b id="d-noz">—</b><small id="d-noz-t"></small></div>
@@ -216,6 +216,7 @@
             </div>
             <div class="chart-axis"><span>−30 分钟</span><span>−15 分钟</span><span>现在</span></div>
             <div class="temp-controls" data-admin>
+              <label id="t-nozzle-wrap" hidden>喷嘴头 <select id="t-nozzle" aria-label="选择要调温的喷嘴"></select></label>
               <label>喷嘴 <input type="number" id="t-noz" min="0" max="350" placeholder="°C" inputmode="numeric"></label>
               <label>热床 <input type="number" id="t-bed" min="0" max="120" placeholder="°C" inputmode="numeric"></label>
               <button class="btn sm" id="t-apply">应用</button>

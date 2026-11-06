@@ -62,6 +62,7 @@ ALLOWED_SET_KEYS = {
     "stop",
     "lightSw",
     "nozzleTempControl",
+    "setNozzleTemp",
     "bedTempControl",
     "setFeedratePct",
     "setFlowratePct",
@@ -150,7 +151,7 @@ class Printer:
         self._send_lock = asyncio.Lock()
         self._task: asyncio.Task | None = None
         self._on_update = on_update
-        self.temps: deque[tuple[float, float | None, float | None, float | None, float | None]] = deque(maxlen=TEMP_HISTORY)
+        self.temps: deque[tuple[float | None, ...]] = deque(maxlen=TEMP_HISTORY)
         self._last_sample = 0.0
 
     # ---------- lifecycle ----------
@@ -289,13 +290,66 @@ class Printer:
             return
         self._last_sample = now
 
-        def f(k: str) -> float | None:
+        def temperature(value: Any) -> float | None:
             try:
-                return round(float(self.data[k]), 1)
-            except (KeyError, TypeError, ValueError):
+                result = float(value)
+                return round(result, 1) if math.isfinite(result) else None
+            except (TypeError, ValueError):
                 return None
 
-        self.temps.append((round(now), f("nozzleTemp"), f("targetNozzleTemp"), f("bedTemp0"), f("targetBedTemp0")))
+        def f(k: str, index: int = 0) -> float | None:
+            value = self.data.get(k)
+            if isinstance(value, (list, tuple)):
+                value = value[index] if index < len(value) else None
+            return temperature(value)
+
+        nozzle_state = self.data.get("nozzleState")
+        nozzle_rows = nozzle_state.get("nozzles") if isinstance(nozzle_state, dict) else None
+        nozzle_readings = [
+            (temperature(nozzle.get("temperature")), temperature(nozzle.get("targetTemp")))
+            for nozzle in nozzle_rows
+            if isinstance(nozzle, dict)
+        ] if isinstance(nozzle_rows, list) else []
+
+        nozzle_indices = {0}
+        for key in self.data:
+            match = re.fullmatch(r"targetNozzleTemp_?(\d*)|nozzleTemp_?(\d*)", key)
+            if match:
+                nozzle_indices.add(int(match.group(1) or match.group(2) or 0))
+        for key in ("nozzleTemp", "targetNozzleTemp"):
+            value = self.data.get(key)
+            if isinstance(value, (list, tuple)):
+                nozzle_indices.update(range(len(value)))
+
+        def nozzle_value(prefix: str, index: int) -> float | None:
+            candidates = (
+                (prefix, f"{prefix}0", f"{prefix}_0")
+                if index == 0
+                else (f"{prefix}{index}", f"{prefix}_{index}")
+            )
+            for key in candidates:
+                if key in self.data:
+                    return f(key)
+            if isinstance(self.data.get(prefix), (list, tuple)):
+                return f(prefix, index)
+            return None
+
+        sample: list[float | None] = [
+            round(now),
+            *(nozzle_readings[0] if nozzle_readings else (
+                nozzle_value("nozzleTemp", 0),
+                nozzle_value("targetNozzleTemp", 0),
+            )),
+            f("bedTemp0"),
+            f("targetBedTemp0"),
+        ]
+        if nozzle_readings:
+            for reading in nozzle_readings[1:]:
+                sample.extend(reading)
+        else:
+            for index in range(1, max(nozzle_indices) + 1):
+                sample.extend((nozzle_value("nozzleTemp", index), nozzle_value("targetNozzleTemp", index)))
+        self.temps.append(tuple(sample))
 
     def thumbnail_url(self, name: str) -> str:
         """G-code thumbnail: http://<ip>/downloads/humbnail/<name>.png ("humbnail": sic, Creality's spelling)."""

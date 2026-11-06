@@ -191,7 +191,7 @@ input[type=number], input[type=search], input[type=text], input[type=password], 
 .stats > div { background: var(--surface); padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
 .stats b { font-variant-numeric: tabular-nums; }
 
-.legend { display: flex; gap: 12px; font-size: 12px; color: var(--muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 12px; font-size: 12px; color: var(--muted); }
 .lg::before { content: ""; display: inline-block; width: 14px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; background: currentColor; }
 .lg.noz { color: var(--noz); } .lg.bed { color: var(--bed); }
 .lg.tgt::before { background: repeating-linear-gradient(90deg, var(--muted) 0 4px, transparent 4px 7px); }
@@ -215,6 +215,7 @@ input[type=number], input[type=search], input[type=text], input[type=password], 
 .chart-axis { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; margin-top: 2px; }
 .temp-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 14px; }
 .temp-controls label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.temp-controls [hidden] { display: none; }
 .temp-controls input { width: 76px; }
 
 .filament { display: flex; flex-direction: column; gap: 10px; }

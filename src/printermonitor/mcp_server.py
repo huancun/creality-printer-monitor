@@ -471,20 +471,36 @@ def build(client: Client | None = None) -> MCPServer:
 
     # ---------- direct controls ----------
     @mcp.tool(annotations=ACT, structured_output=False)
-    async def set_temperatures(printer: str, nozzle: float | None = None, bed: float | None = None) -> str:
+    async def set_temperatures(
+        printer: str,
+        nozzle: float | None = None,
+        bed: float | None = None,
+        nozzle_id: int | None = None,
+    ) -> str:
         """Set the nozzle and/or bed target temperature (0 to turn heating off).
 
         Args:
             printer: printer name, id or IP address.
             nozzle: nozzle target in °C (0–300).
             bed: bed target in °C (0–110).
+            nozzle_id: nozzle ID on a multi-nozzle printer; defaults to its selected nozzle.
         """
         p = await api.find(printer)
         params: dict[str, Any] = {}
         if nozzle is not None:
             if not 0 <= nozzle <= 300:
                 raise ToolError("nozzle: between 0 and 300 °C")
-            params["nozzleTempControl"] = round(nozzle)
+            nozzle_state = p.get("data", {}).get("nozzleState", {})
+            nozzles = nozzle_state.get("nozzles", []) if isinstance(nozzle_state, dict) else []
+            if isinstance(nozzles, list) and len(nozzles) > 1:
+                selected_id = nozzle_id if nozzle_id is not None else nozzle_state.get("selected")
+                if not any(isinstance(item, dict) and item.get("id") == selected_id for item in nozzles):
+                    raise ToolError(f"unknown nozzle ID: {selected_id}")
+                params["setNozzleTemp"] = {"id": selected_id, "temp": round(nozzle)}
+            elif nozzle_id is not None:
+                raise ToolError("nozzle_id is only available on multi-nozzle printers")
+            else:
+                params["nozzleTempControl"] = round(nozzle)
         if bed is not None:
             if not 0 <= bed <= 110:
                 raise ToolError("bed: between 0 and 110 °C")

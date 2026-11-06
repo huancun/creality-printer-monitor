@@ -361,9 +361,25 @@ function renderDetail() {
   $("#d-light").disabled = !p.online;
 
   // Temperatures
-  $("#d-noz").textContent = deg(d.nozzleTemp);
+  const nozzleRows = Array.isArray(d.nozzleState?.nozzles)
+    ? d.nozzleState.nozzles.filter((nozzle) => nozzle && Number.isFinite(Number(nozzle.id)))
+    : [];
+  const nozzleSelect = $("#t-nozzle");
+  const previousNozzleId = nozzleSelect.value;
+  nozzleSelect.innerHTML = nozzleRows
+    .map((nozzle) => `<option value="${Number(nozzle.id)}">喷嘴 ${Number(nozzle.id)}</option>`)
+    .join("");
+  const selectedNozzleId = nozzleRows.some((nozzle) => String(nozzle.id) === previousNozzleId)
+    ? previousNozzleId
+    : String(nozzleRows.find((nozzle) => String(nozzle.id) === String(d.nozzleState?.selected))?.id ?? nozzleRows[0]?.id ?? "");
+  nozzleSelect.value = selectedNozzleId;
+  $("#t-nozzle-wrap").hidden = nozzleRows.length < 2;
+  const selectedNozzle = nozzleRows.find((nozzle) => String(nozzle.id) === selectedNozzleId);
+  const currentNozzle = selectedNozzle?.temperature ?? d.nozzleTemp;
+  const targetNozzle = selectedNozzle?.targetTemp ?? d.targetNozzleTemp;
+  $("#d-noz").textContent = deg(currentNozzle);
   $("#d-bed").textContent = deg(d.bedTemp0);
-  $("#d-noz-t").textContent = num(d.targetNozzleTemp) ? `目标 ${deg(d.targetNozzleTemp)}` : "关闭";
+  $("#d-noz-t").textContent = num(targetNozzle) ? `目标 ${deg(targetNozzle)}` : "关闭";
   $("#d-bed-t").textContent = num(d.targetBedTemp0) ? `目标 ${deg(d.targetBedTemp0)}` : "关闭";
 
   // Filament
@@ -486,16 +502,24 @@ function drawChart(rows) {
   const svg = $("#chart");
   const W = 600, H = 160, now = Date.now() / 1000, span = 1800;
   if (rows.length < 2) { svg.innerHTML = ""; $("#chart-labels").innerHTML = `<em>温度记录将在几分钟后显示…</em>`; return; }
-  const vals = rows.flatMap((r) => r.slice(1).filter((v) => v !== null));
+  const vals = rows.flatMap((r) => r.slice(1).filter(Number.isFinite));
+  if (!vals.length) { svg.innerHTML = ""; $("#chart-labels").innerHTML = `<em>温度记录将在几分钟后显示…</em>`; return; }
   const top = Math.max(60, Math.ceil((Math.max(...vals) + 10) / 50) * 50);
   const x = (t) => Math.max(0, W - ((now - t) / span) * W);
   const y = (v) => H - (v / top) * (H - 8) - 4;
-  const path = (i) => rows.filter((r) => r[i] !== null).map((r, k) => `${k ? "L" : "M"}${x(r[0]).toFixed(1)},${y(r[i]).toFixed(1)}`).join("");
-  const area = (i) => { const p = path(i); const pts = rows.filter((r) => r[i] !== null); return p ? `${p}L${x(pts.at(-1)[0]).toFixed(1)},${H}L${x(pts[0][0]).toFixed(1)},${H}Z` : ""; };
+  const path = (i) => rows.filter((r) => Number.isFinite(r[i])).map((r, k) => `${k ? "L" : "M"}${x(r[0]).toFixed(1)},${y(r[i]).toFixed(1)}`).join("");
+  const area = (i) => { const p = path(i); const pts = rows.filter((r) => Number.isFinite(r[i])); return p ? `${p}L${x(pts.at(-1)[0]).toFixed(1)},${H}L${x(pts[0][0]).toFixed(1)},${H}Z` : ""; };
+  const nozzleCount = Math.max(1, ...rows.map((r) => 1 + Math.floor(Math.max(0, r.length - 5) / 2)));
+  const nozzleColors = ["#78b8ff", "#b9e572", "#c5a1ff", "#fb7185"];
+  const nozzles = Array.from({ length: nozzleCount }, (_, index) => {
+    const currentIndex = index === 0 ? 1 : 5 + (index - 1) * 2;
+    return { color: nozzleColors[index % nozzleColors.length], current: currentIndex, target: currentIndex + 1 };
+  });
   const levels = [0.25, 0.5, 0.75].map((f) => Math.round(top * f));
   const grid = levels.map((v) => `<line class="grid-line" x1="0" x2="${W}" y1="${y(v)}" y2="${y(v)}"/>`).join("");
   // Axis labels in HTML: the SVG is stretched, text inside it would be distorted.
   $("#chart-labels").innerHTML = levels.map((v) => `<span style="top:${(y(v) / H) * 100}%">${v}°</span>`).join("");
+  $("#chart-legend").innerHTML = `${nozzles.map((nozzle, index) => `<span class="lg" style="color:${nozzle.color}">${nozzleCount > 1 ? `喷嘴 ${index + 1}` : "喷嘴"}</span>`).join("")}<span class="lg bed">热床</span><span class="lg tgt">目标</span>`;
   svg.innerHTML = `
     <defs>
       <linearGradient id="g-noz" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--noz)" stop-opacity=".25"/><stop offset="1" stop-color="var(--noz)" stop-opacity="0"/></linearGradient>
@@ -503,8 +527,10 @@ function drawChart(rows) {
     </defs>
     ${grid}
     <path class="area-bed" d="${area(3)}"/><path class="area-noz" d="${area(1)}"/>
-    <path class="line target noz" d="${path(2)}"/><path class="line target bed" d="${path(4)}"/>
-    <path class="line bed" d="${path(3)}"/><path class="line noz" d="${path(1)}"/>`;
+    ${nozzles.map((nozzle) => `<path class="line target" style="stroke:${nozzle.color}" d="${path(nozzle.target)}"/>`).join("")}
+    <path class="line target bed" d="${path(4)}"/>
+    <path class="line bed" d="${path(3)}"/>
+    ${nozzles.map((nozzle) => `<path class="line" style="stroke:${nozzle.color}" d="${path(nozzle.current)}"/>`).join("")}`;
 }
 
 // ---------- files ----------
@@ -691,7 +717,20 @@ $("#d-reboot").onclick = async () => {
 
 function setTemps(noz, bed) {
   const params = {};
-  if (noz !== null) params.nozzleTempControl = noz;
+  if (noz !== null) {
+    const p = printers.get(current);
+    const nozzles = p?.data?.nozzleState?.nozzles;
+    if (Array.isArray(nozzles) && nozzles.length > 1) {
+      const id = Number($("#t-nozzle").value);
+      if (!nozzles.some((nozzle) => Number(nozzle.id) === id)) {
+        toast("请选择要调温的喷嘴", true);
+        return;
+      }
+      params.setNozzleTemp = { id, temp: noz };
+    } else {
+      params.nozzleTempControl = noz;
+    }
+  }
   if (bed !== null) params.bedTempControl = { num: 0, val: bed };
   if (Object.keys(params).length) command(params, "目标温度已发送");
 }

@@ -13,7 +13,7 @@ It talks to the printers directly on your LAN with the same protocol as Creality
 
 - **Finds your printers on the network automatically**, and finds them again if your router gives them a new IP.
 - One dashboard for all printers: live camera, progress, temperatures, time left, loaded filament.
-- Pause / resume / stop, light, temperatures, fans, speed, axis moves, G-code console.
+- Pause / resume / stop, light, temperatures (including per-nozzle control on multi-nozzle models), fans, speed, axis moves, G-code console.
 - Drag & drop a file to upload and print it, or send one file to several printers at once.
 - Built-in slicing of `.stl` / `.3mf` / `.obj` / `.step` with OrcaSlicer's official Creality profiles, with a 3D preview.
 - Print history with costs (filament + power), monthly stats, maintenance reminders.
