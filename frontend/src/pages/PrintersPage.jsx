@@ -127,9 +127,15 @@ function PrinterGridCard({ printer, onOpen }) {
   );
 }
 
-export default function PrintersPage({ printers, isAdmin, notify, onAdd }) {
+export default function PrintersPage({ printers, isAdmin, notify, onAdd, initialSelectedId }) {
   const [selectedId, setSelectedId] = useState(null);
   const selected = printers.find((printer) => printer.id === selectedId) || null;
+
+  useEffect(() => {
+    if (initialSelectedId && printers.some((printer) => printer.id === initialSelectedId)) {
+      setSelectedId(initialSelectedId);
+    }
+  }, [initialSelectedId, printers]);
 
   const count = (predicate) => printers.filter(predicate).length;
   const chips = [

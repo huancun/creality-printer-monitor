@@ -144,14 +144,15 @@ function TemperatureCard({ printer, isAdmin, notify }) {
   const { id: printerId } = printer;
   const data = printer.raw.data || {};
   const [rows, setRows] = useState([]);
-  const [nozzleId, setNozzleId] = useState("");
   const [nozzleInput, setNozzleInput] = useState("");
   const [bedInput, setBedInput] = useState("");
+  const [controlTarget, setControlTarget] = useState(null);
+  const [controlNozzleId, setControlNozzleId] = useState("");
   const nozzles = Array.isArray(data.nozzleState?.nozzles)
     ? data.nozzleState.nozzles.filter((nozzle) => nozzle && nozzle.id !== undefined)
     : [];
-  const selectedNozzleId = nozzles.some((nozzle) => String(nozzle.id) === nozzleId)
-    ? nozzleId
+  const selectedNozzleId = nozzles.some((nozzle) => String(nozzle.id) === controlNozzleId)
+    ? controlNozzleId
     : String(nozzles.find((nozzle) => String(nozzle.id) === String(data.nozzleState?.selected))?.id ?? nozzles[0]?.id ?? "");
   const selectedNozzle = nozzles.find((nozzle) => String(nozzle.id) === selectedNozzleId);
   const readouts = nozzles.length
@@ -163,9 +164,10 @@ function TemperatureCard({ printer, isAdmin, notify }) {
     : [{ id: null, current: data.nozzleTemp, target: data.targetNozzleTemp }];
 
   useEffect(() => {
-    setNozzleId("");
     setNozzleInput("");
     setBedInput("");
+    setControlTarget(null);
+    setControlNozzleId("");
   }, [printerId]);
 
   useEffect(() => {
@@ -252,14 +254,40 @@ function TemperatureCard({ printer, isAdmin, notify }) {
     }
   };
 
+  const openControls = (target, nozzleId = "") => {
+    if (isAdmin) {
+      setControlTarget(target);
+      setControlNozzleId(nozzleId === null ? "" : String(nozzleId));
+    }
+  };
+
+  const toggleControls = (event, target, nozzleId = "") => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openControls(target, nozzleId);
+    }
+  };
+
   return (
-    <Card title="温度" extra={<span className="text-[10px] text-muted">最近30分钟 · 每 5 秒采样</span>}>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
+    <>
+      <Card title="温度" extra={<span className="text-[10px] text-muted">{isAdmin ? "点击温度调节" : "最近30分钟 · 每 5 秒采样"}</span>}>
+      <div
+        role={isAdmin ? "button" : undefined}
+        tabIndex={isAdmin ? 0 : undefined}
+        className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5"
+      >
         {readouts.map((nozzle, index) => {
           const current = num(nozzle.current);
           const target = num(nozzle.target);
           return (
-            <div key={nozzle.id ?? "nozzle"} className="min-w-0 rounded-xl border border-line bg-ink/60 px-3 py-2.5">
+            <div
+              key={nozzle.id ?? "nozzle"}
+              role={isAdmin ? "button" : undefined}
+              tabIndex={isAdmin ? 0 : undefined}
+              onClick={() => openControls("nozzle", nozzle.id)}
+              onKeyDown={(event) => toggleControls(event, "nozzle", nozzle.id)}
+              className={`min-w-0 rounded-xl border border-line bg-ink/60 px-3 py-2.5 ${isAdmin ? "cursor-pointer outline-none hover:border-lime/60 focus-visible:ring-1 focus-visible:ring-lime" : ""}`}
+            >
               <div className="truncate text-[10px] text-muted">{nozzle.id === null ? "喷嘴" : `喷嘴 ${nozzle.id}`}</div>
               <div className="mt-1 text-base font-semibold tabular-nums text-white">{degrees(current)}</div>
               <div className="mt-0.5 truncate text-[10px] text-muted">
@@ -268,7 +296,13 @@ function TemperatureCard({ printer, isAdmin, notify }) {
             </div>
           );
         })}
-        <div className="min-w-0 rounded-xl border border-line bg-ink/60 px-3 py-2.5">
+        <div
+          role={isAdmin ? "button" : undefined}
+          tabIndex={isAdmin ? 0 : undefined}
+          onClick={() => openControls("bed")}
+          onKeyDown={(event) => toggleControls(event, "bed")}
+          className={`min-w-0 rounded-xl border border-line bg-ink/60 px-3 py-2.5 ${isAdmin ? "cursor-pointer outline-none hover:border-lime/60 focus-visible:ring-1 focus-visible:ring-lime" : ""}`}
+        >
           <div className="text-[10px] text-muted">热床</div>
           <div className="mt-1 text-base font-semibold tabular-nums text-white">{degrees(data.bedTemp0)}</div>
           <div className="mt-0.5 truncate text-[10px] text-muted">
@@ -328,26 +362,20 @@ function TemperatureCard({ printer, isAdmin, notify }) {
         )}
       </div>
 
-      {isAdmin && (
-        <div className="mt-4 border-t border-line pt-4">
-          <div className="mb-2 text-xs font-medium text-[#b8bdc7]">调节温度</div>
+      </Card>
+
+      {isAdmin && controlTarget && (
+      <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={() => setControlTarget(null)}>
+        <div className="w-full max-w-md rounded-2xl border border-line bg-panel p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-white">调节{controlTarget === "nozzle" ? "喷嘴" : "热床"}温度</h3>
+              <p className="mt-1 text-[10px] text-muted">{printer.name}</p>
+            </div>
+            <button type="button" onClick={() => setControlTarget(null)} aria-label="关闭温度调节" className="text-lg text-muted hover:text-white">✕</button>
+          </div>
           <div className="flex flex-wrap items-center gap-2">
-            {nozzles.length > 1 && (
-              <label className="flex items-center gap-2 text-[11px] text-muted">
-                喷嘴
-                <select
-                  value={selectedNozzleId}
-                  onChange={(event) => setNozzleId(event.target.value)}
-                  aria-label="选择要调温的喷嘴"
-                  className="rounded-lg border border-line bg-ink px-3 py-2 text-xs text-white outline-none focus:border-lime"
-                >
-                  {nozzles.map((nozzle) => (
-                    <option key={nozzle.id} value={String(nozzle.id)}>喷嘴 {nozzle.id}</option>
-                  ))}
-                </select>
-              </label>
-            )}
-            <label className="flex items-center gap-2 text-[11px] text-muted">
+            {controlTarget === "nozzle" && <label className="flex items-center gap-2 text-[11px] text-muted">
               喷嘴 °C
               <input
                 type="number"
@@ -358,8 +386,8 @@ function TemperatureCard({ printer, isAdmin, notify }) {
                 onChange={(event) => setNozzleInput(event.target.value)}
                 className="w-24 rounded-lg border border-line bg-ink px-3 py-2 text-xs text-white outline-none focus:border-lime"
               />
-            </label>
-            <label className="flex items-center gap-2 text-[11px] text-muted">
+            </label>}
+            {controlTarget === "bed" && <label className="flex items-center gap-2 text-[11px] text-muted">
               热床 °C
               <input
                 type="number"
@@ -370,35 +398,26 @@ function TemperatureCard({ printer, isAdmin, notify }) {
                 onChange={(event) => setBedInput(event.target.value)}
                 className="w-24 rounded-lg border border-line bg-ink px-3 py-2 text-xs text-white outline-none focus:border-lime"
               />
-            </label>
+            </label>}
             <button
               onClick={() => {
-                void setTemps(nozzleInput === "" ? null : num(nozzleInput), bedInput === "" ? null : num(bedInput));
+                void setTemps(
+                  controlTarget === "nozzle" && nozzleInput !== "" ? num(nozzleInput) : null,
+                  controlTarget === "bed" && bedInput !== "" ? num(bedInput) : null,
+                );
                 setNozzleInput("");
                 setBedInput("");
+                setControlTarget(null);
               }}
               className="rounded-lg bg-lime px-3 py-2 text-xs font-semibold text-ink"
             >
               发送
             </button>
-            <span className="mx-1 hidden h-5 w-px bg-line sm:block" />
-            {[
-              ["PLA", 210, 60],
-              ["PETG", 240, 75],
-              ["冷却", 0, 0],
-            ].map(([label, nozzle, bed]) => (
-              <button
-                key={label}
-                onClick={() => void setTemps(nozzle, bed)}
-                className="rounded-lg border border-line px-3 py-2 text-[11px] text-[#c2c6ce] transition hover:bg-white/[.05]"
-              >
-                {label}
-              </button>
-            ))}
           </div>
         </div>
+      </div>
       )}
-    </Card>
+    </>
   );
 }
 

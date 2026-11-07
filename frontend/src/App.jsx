@@ -106,7 +106,6 @@ function Sidebar({ active, onNavigate, printerCount, onlineCount, isAdmin }) {
           <span className={`flex items-center gap-1.5 text-[10px] ${onlineCount ? "text-lime" : "text-amber-300"}`}><i className={`h-1.5 w-1.5 rounded-full ${onlineCount ? "bg-lime" : "bg-amber-300"}`} />{onlineCount ? "运行正常" : "无在线设备"}</span>
         </div>
         <div className="mt-3 text-xs text-[#d9dce2]">{onlineCount} / {printerCount} 台设备在线</div>
-        <div className="mt-1 text-[10px] text-[#666c79]">状态由 Python 服务同步</div>
       </div>
     </aside>
   );
@@ -156,7 +155,7 @@ function ProgressRing({ value, color }) {
   );
 }
 
-function PrinterCard({ printer, onAction, isAdmin }) {
+function PrinterCard({ printer, onAction, onOpen, isAdmin }) {
   const status = {
     printing: ["正在打印", "text-lime"],
     processing: ["准备中", "text-sky-300"],
@@ -173,7 +172,7 @@ function PrinterCard({ printer, onAction, isAdmin }) {
       ? "恢复打印"
       : "设备详情";
   return (
-    <article className="overflow-hidden rounded-2xl border border-line bg-panel transition hover:border-[#3a414e]">
+    <article onClick={() => onOpen?.(printer)} className="cursor-pointer overflow-hidden rounded-2xl border border-line bg-panel transition hover:border-[#3a414e]">
       <PrinterArt color={printer.color} kind={printer.kind} />
       <div className="p-4">
         <div className="flex items-start justify-between gap-3">
@@ -203,7 +202,7 @@ function PrinterCard({ printer, onAction, isAdmin }) {
             <span>热床 <b className="ml-1 font-medium text-[#d7d9df]">{printer.bed === "—" ? "—" : `${printer.bed}°`}</b></span>
           </div>
           {isAdmin && ["printing", "paused"].includes(printer.state)
-            ? <button disabled={!printer.online} onClick={() => onAction(printer)} className="rounded-lg px-2.5 py-1.5 text-[10px] text-[#aeb4c0] transition hover:bg-white/[.06] hover:text-white disabled:cursor-not-allowed disabled:opacity-40">{actionLabel}</button>
+            ? <button disabled={!printer.online} onClick={(event) => { event.stopPropagation(); onAction(printer); }} className="rounded-lg px-2.5 py-1.5 text-[10px] text-[#aeb4c0] transition hover:bg-white/[.06] hover:text-white disabled:cursor-not-allowed disabled:opacity-40">{actionLabel}</button>
             : <span className="text-[10px] text-[#747b88]">{printer.online ? "实时状态" : "离线"}</span>}
         </div>
       </div>
@@ -256,6 +255,7 @@ function App() {
   const [selectedUploadPrinters, setSelectedUploadPrinters] = useState([]);
   const [discovering, setDiscovering] = useState(false);
   const [discoverResults, setDiscoverResults] = useState(null);
+  const [selectedPrinterId, setSelectedPrinterId] = useState(null);
   const addFormRef = useRef(null);
 
   const notify = useCallback((message) => {
@@ -488,12 +488,17 @@ function App() {
     setActive(label);
   };
 
+  const openPrinter = (printer) => {
+    setSelectedPrinterId(printer.id);
+    setActive("打印机");
+  };
+
   if (session.checking) {
-    return <main className="grid min-h-screen place-items-center text-sm text-muted">正在连接 Python 服务…</main>;
+    return <main className="grid min-h-screen place-items-center text-sm text-muted">正在连接服务…</main>;
   }
   if (!session.user) {
     if (session.error) {
-      return <main className="grid min-h-screen place-items-center px-6 text-center"><div className="max-w-md"><p className="text-sm font-medium text-red-300">无法连接 Python 服务</p><p className="mt-2 text-xs leading-relaxed text-muted">{session.error}</p><p className="mt-3 text-xs text-muted">请确认 Python 服务已启动，并检查前端代理地址配置。</p><button onClick={() => window.location.reload()} className="mt-5 rounded-lg border border-line px-4 py-2 text-xs text-white">重试</button></div></main>;
+      return <main className="grid min-h-screen place-items-center px-6 text-center"><div className="max-w-md"><p className="text-sm font-medium text-red-300">无法连接服务</p><p className="mt-2 text-xs leading-relaxed text-muted">{session.error}</p><p className="mt-3 text-xs text-muted">请确认服务已启动，并检查前端代理地址配置。</p><button onClick={() => window.location.reload()} className="mt-5 rounded-lg border border-line px-4 py-2 text-xs text-white">重试</button></div></main>;
     }
     return <AuthScreen setup={session.setup} onAuthenticated={(user) => setSession({ checking: false, user, setup: false, error: "" })} />;
   }
@@ -564,7 +569,7 @@ function App() {
               {loadError && <div role="alert" className="mb-4 rounded-xl border border-red-400/25 bg-red-400/[.06] px-4 py-3 text-xs text-red-200">加载失败：{loadError} <button className="ml-2 underline" onClick={() => window.location.reload()}>重试</button></div>}
               <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
                 {loading && !printerList.length ? <div className="col-span-full rounded-2xl border border-line bg-panel p-8 text-center text-xs text-muted">正在读取打印机数据…</div>
-                  : printerList.length ? printerList.map((printer) => <PrinterCard key={printer.id} printer={printer} onAction={performPrinterAction} isAdmin={isAdmin} />)
+                  : printerList.length ? printerList.map((printer) => <PrinterCard key={printer.id} printer={printer} onAction={performPrinterAction} onOpen={openPrinter} isAdmin={isAdmin} />)
                     : <div className="col-span-full rounded-2xl border border-line bg-panel p-8 text-center"><p className="text-sm text-white">还没有添加打印机</p><p className="mt-2 text-xs text-muted">{isAdmin ? "使用“添加设备”录入打印机 IP 地址。" : "请联系管理员添加打印机。"}</p></div>}
               </div>
               <div className="mt-6 rounded-2xl border border-line bg-panel p-4 sm:p-5">
@@ -612,11 +617,10 @@ function App() {
             </aside>
           </div>
           </>)}
-          {active === "打印机" && <PrintersPage printers={printerList} isAdmin={isAdmin} notify={notify} onAdd={() => setAddOpen(true)} />}
+          {active === "打印机" && <PrintersPage printers={printerList} isAdmin={isAdmin} notify={notify} onAdd={() => setAddOpen(true)} initialSelectedId={selectedPrinterId} />}
           {active === "打印历史" && <HistoryPage printers={printerList} isAdmin={isAdmin} notify={notify} />}
           {active === "文件库" && <FilesPage printers={printerList} isAdmin={isAdmin} notify={notify} onNavigate={setActive} />}
           {active === "设置" && <SettingsPage printers={printerList} user={session.user} notify={notify} />}
-          <footer className="mt-8 flex flex-col justify-between gap-2 border-t border-line pt-4 text-[9px] text-[#626875] sm:flex-row"><span>CREALITY PRINT MONITOR <span className="mx-1.5">·</span> Python API 实时数据</span><span>局域网运行 <span className="mx-1.5">·</span> 数据仅存储于本地</span></footer>
         </div>
       </main>
       {addOpen && isAdmin && <div className="fixed inset-0 z-40 grid place-items-center bg-black/70 p-4" onClick={() => setAddOpen(false)}>
