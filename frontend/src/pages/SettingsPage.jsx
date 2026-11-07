@@ -182,102 +182,6 @@ function UsersCard({ user, notify }) {
   );
 }
 
-// ---------- slicer card ----------
-function SlicerCard() {
-  const [status, setStatus] = useState(null);
-  const [busy, setBusy] = useState(false);
-
-  const load = async () => {
-    try {
-      setStatus(await api("/api/slicer"));
-    } catch {
-      /* keep the last known status */
-    }
-  };
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // poll while an install is running (progress arrives via polling, not the websocket)
-  const step = status?.install?.step;
-  useEffect(() => {
-    if (step !== "download" && step !== "extract") return undefined;
-    const timer = window.setInterval(load, 2000);
-    return () => window.clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step]);
-
-  const install = async () => {
-    setBusy(true);
-    try {
-      setStatus(await api("/api/slicer/install", { method: "POST" }));
-    } catch (error) {
-      setStatus((current) => ({ ...current, install: { step: "error", progress: 0, error: error.message } }));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const installState = status?.install || {};
-  if (!status) return <p className="text-xs text-muted">正在检查切片器状态…</p>;
-
-  if (installState.step === "download" || installState.step === "extract") {
-    return (
-      <div>
-        <p className="text-xs text-[#d5d8df]">
-          {installState.step === "download" ? `正在下载 Creality Print… ${Math.round(installState.progress || 0)} %` : "正在解压…"}
-        </p>
-        <div className="mt-2 h-2 rounded-full bg-white/[.07]">
-          <div className="h-2 rounded-full bg-lime transition-all" style={{ width: `${Math.min(100, installState.progress || 0)}%` }} />
-        </div>
-      </div>
-    );
-  }
-
-  if (status.available) {
-    const catalog = status.catalog || {};
-    return (
-      <div>
-        <p className="flex items-center gap-2 text-xs text-[#d5d8df]">
-          <i className="h-2 w-2 rounded-full bg-lime" /> Creality Print 已安装。
-        </p>
-        <p className="mt-2 text-[10px] text-muted">
-          {catalog.machine
-            ? `${catalog.machine} 配置：${catalog.processes?.length || 0} 个质量预设，${catalog.filaments?.length || 0} 种耗材。`
-            : "未找到 Creality Hi 配置文件。"}
-        </p>
-        <div className="mt-3 flex gap-2">
-          <button className={smallBtn} onClick={load}>刷新状态</button>
-        </div>
-      </div>
-    );
-  }
-
-  if (status.can_install === false) {
-    return (
-      <p className="text-xs leading-relaxed text-muted">
-        如需在应用中直接切片 .stl / .3mf 文件，请安装 Creality Print 7.3 或更高版本（官方支持 K3），并将环境变量{" "}
-        <code className="rounded bg-ink px-1">CREALITY_PRINT</code> 指向其可执行文件，然后重启应用。
-      </p>
-    );
-  }
-
-  return (
-    <div>
-      <p className="text-xs leading-relaxed text-muted">
-        应用会从 Creality Print GitHub Releases 获取最新的 Linux x86_64 AppImage 并安装。K3 的多喷嘴和混色配置由 Creality Print 提供。
-      </p>
-      {installState.step === "error" && (
-        <p className="mt-2 rounded-lg border border-red-400/30 bg-red-400/[.07] px-3 py-2 text-[11px] text-red-300">{installState.error}</p>
-      )}
-      <button onClick={install} disabled={busy} className={`${primaryBtn} mt-3 disabled:opacity-50`}>
-        {busy ? "正在启动安装…" : "安装最新 Creality Print"}
-      </button>
-    </div>
-  );
-}
-
 export default function SettingsPage({ printers, user, notify }) {
   const [settings, setSettings] = useState(null);
   const [form, setForm] = useState(null);
@@ -663,7 +567,6 @@ export default function SettingsPage({ printers, user, notify }) {
             </div>
           </Card>
 
-          <SlicerCard />
           <UsersCard user={user} notify={notify} />
         </div>
       )}

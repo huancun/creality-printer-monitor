@@ -1,7 +1,7 @@
 """MCP server: lets Claude (Desktop, Code…) control the printers.
 
 It goes through the app's HTTP API (a single connection per printer, and all of
-the app's features: camera, slicing, history, clear error messages).
+the app's features: camera, G-code sending, history, clear error messages).
 
 Two ways to use it:
   - stdio: `python run_mcp.py` (PM_URL variable if the app is not on localhost:8000);
@@ -36,8 +36,6 @@ STATE_LABELS = {
     "self_test": "self-test",
 }
 BUSY = {"printing", "paused", "processing", "self_test"}
-MODEL_EXT = {".stl", ".3mf", ".obj", ".step", ".stp"}
-
 INSTRUCTIONS = """\
 Control of the user's Creality 3D printers (Creality Hi, K1, K2) on their local network.
 - Start with `list_printers` to learn which printers exist; refer to them by name.
@@ -351,58 +349,31 @@ def build(client: Client | None = None) -> MCPServer:
         path: str = "",
         url: str = "",
         start: bool = False,
-        quality: str = "",
-        filament: str = "",
     ) -> str:
-        """Send a file to one or more printers, and start printing if `start`.
-        A .gcode is sent as is; a 3D model (.stl, .3mf, .obj, .step) is sliced first
-        with the printer's Creality Print profiles (see `slicer_profiles`).
+        """Send a G-code file to one or more printers, and start printing if `start`.
 
         Args:
             printers: names of the target printers.
             path: path of the file on the machine running this MCP server.
             url: or direct web address of the file (http/https).
             start: start printing after the upload (check first that the beds are clear).
-            quality: process (quality) profile (e.g. "0.20mm Standard @Creality Hi"); default: 0.20 mm Standard.
-            filament: filament profile (e.g. "Creality Generic PETG @Hi-all"); default: the loaded one, otherwise PLA.
         """
         targets = [await api.find(name) for name in printers]
         if not targets:
             raise ToolError("specify at least one printer")
         name, data = await _read_source(path, url)
         ext = Path(name).suffix.lower()
-        if ext not in MODEL_EXT | {".gcode"}:
-            raise ToolError("supported formats: .gcode, .stl, .3mf, .obj, .step")
-        report = []
+        if ext != ".gcode":
+            raise ToolError("only .gcode files are supported; slice the model in a slicer first")
         form: dict[str, str] = {"printers": ",".join(p["id"] for p in targets), "start": "true" if start else "false"}
-        files = None
-        if ext == ".gcode":
-            files = {"file": (name, data)}
-        else:
-            model = targets[0].get("model") or "Creality Hi"
-            st = await api.get("/api/slicer", params={"model": model})
-            if not st.get("available"):
-                raise ToolError("Creality Print is not installed (Settings → Slicing): send a .gcode instead.")
-            cat = st["catalog"]
-            if not cat.get("machine"):
-                raise ToolError(f'no slicing profiles for "{model}"')
-            process = _pick(quality, cat["processes"], "0.20mm Standard")
-            fil = _pick(filament or _loaded_profile(targets[0], cat["filaments"]), cat["filaments"], "Creality Generic PLA @")
-            job = await api.post("/api/slice", files={"file": (name, data)},
-                                 data={"machine": cat["machine"], "process": process, "filament": fil}, timeout=60)
-            job = await api.wait_job(job["id"])
-            if job["step"] == "error":
-                raise ToolError(job["error"])
-            meta = job.get("meta") or {}
-            report.append(f'Sliced with "{process}" / "{fil}": {_dur(meta.get("est_time_s"))}, {meta.get("filament_g", "?")} g.')
-            form["token"] = job["token"]
-        job = await api.post("/api/send", data=form, files=files, timeout=120)
+        job = await api.post("/api/send", data=form, files={"file": (name, data)}, timeout=120)
         job = await api.wait_job(job["id"], timeout=600)
         for t in job.get("targets", {}).values():
-            report.append(f"- {t['name']}: {'OK' if t['step'] == 'done' else 'failed — ' + str(t['error'])}")
+            if t["step"] != "done":
+                raise ToolError(f"{t['name']}: {t['error']}")
         verb = "sent and started" if start else "sent"
         head = f"{job.get('gcode', name)} {verb}" if job["step"] == "done" else "Upload incomplete"
-        return head + "\n" + "\n".join(report)
+        return head
 
     async def _read_source(path: str, url: str) -> tuple[str, bytes]:
         if bool(path) == bool(url):
@@ -417,31 +388,11 @@ def build(client: Client | None = None) -> MCPServer:
         async with httpx.AsyncClient(follow_redirects=True, timeout=120) as c:
             r = await c.get(url)
             r.raise_for_status()
-        name = Path(urlparse(str(r.url)).path).name or "model.stl"
+        name = Path(urlparse(str(r.url)).path).name or "file.gcode"
         if cd := r.headers.get("content-disposition"):
             if "filename=" in cd:
                 name = cd.split("filename=")[-1].strip('"; ')
         return name, r.content
-
-    def _pick(wanted: str, options: list[str], default_prefix: str) -> str:
-        if wanted:
-            for o in options:
-                if o.casefold() == wanted.casefold():
-                    return o
-            matches = [o for o in options if wanted.casefold() in o.casefold()]
-            if matches:
-                return matches[0]
-            raise ToolError(f'unknown profile "{wanted}"; available: {", ".join(options)}')
-        return next((o for o in options if o.startswith(default_prefix)), options[0])
-
-    def _loaded_profile(p: dict[str, Any], options: list[str]) -> str:
-        for box in ((p.get("data") or {}).get("boxsInfo") or {}).get("materialBoxs", []):
-            for m in box.get("materials", []):
-                kind = str(m.get("type") or "").upper()
-                for o in options:
-                    if o.upper().startswith(f"CREALITY GENERIC {kind} @"):
-                        return o
-        return ""
 
     @mcp.tool(annotations=DANGER, structured_output=False)
     async def delete_file(printer: str, file: str) -> str:
@@ -454,20 +405,6 @@ def build(client: Client | None = None) -> MCPServer:
         p = await api.find(printer)
         await api.post(f"/api/printers/{p['id']}/delete", json={"name": file})
         return f"{file} deleted from {p['name']}."
-
-    @mcp.tool(annotations=READ, structured_output=False)
-    async def slicer_profiles(printer: str = "") -> str:
-        """Process (quality) and filament profiles available for slicing (official Creality Print profiles).
-
-        Args:
-            printer: printer whose profiles to list (default: Creality Hi).
-        """
-        model = (await api.find(printer)).get("model") if printer else "Creality Hi"
-        st = await api.get("/api/slicer", params={"model": model or "Creality Hi"})
-        if not st.get("available"):
-            return "Creality Print is not installed (Settings → Slicing in the app)."
-        c = st["catalog"]
-        return f"Machine: {c['machine']}\nProcesses: {', '.join(c['processes'])}\nFilaments: {', '.join(c['filaments'])}"
 
     # ---------- direct controls ----------
     @mcp.tool(annotations=ACT, structured_output=False)

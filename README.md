@@ -3,7 +3,7 @@
 [![CI](https://github.com/catmargiela/creality-printer-monitor/actions/workflows/ci.yml/badge.svg)](https://github.com/catmargiela/creality-printer-monitor/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.12%20%7C%203.13-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![MCP](https://img.shields.io/badge/MCP-26%20tools-8A2BE2)](https://modelcontextprotocol.io)
+[![MCP](https://img.shields.io/badge/MCP-25%20tools-8A2BE2)](https://modelcontextprotocol.io)
 [![Creality](https://img.shields.io/badge/Creality-Hi%20%7C%20K1%20%7C%20K2-1E90FF)](https://www.creality.com)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](#docker)
 [![Platforms](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)](#requirements)
@@ -15,7 +15,7 @@
 - 一个面板管理所有打印机：实时摄像头、进度、温度、剩余时间和已加载耗材。
 - 暂停、继续、停止、灯光、温度（包括多喷嘴独立控温）、风扇、速度、轴移动和 G-code 控制台。
 - 拖放文件即可上传打印，也可以将同一个文件发送到多台打印机。
-- 使用 Creality Print 官方配置对 `.stl`、`.3mf`、`.obj`、`.step` 文件切片，并提供 3D 预览。
+- 预览 G-code 文件并发送到一台或多台打印机，也可管理打印机本地文件。
 - 打印历史和费用统计（耗材与电费）、月度统计、维护提醒。
 - 支持智能插座（Shelly、Tasmota）：打印完成且喷嘴冷却后自动断电。
 - 提供清晰的错误信息和处理建议（耗材用尽、AI spaghetti 检测、堵头、断电等）。
@@ -38,7 +38,6 @@
 - Python **3.12+** 和 pip（或 Docker）。
 - 运行应用的电脑必须与打印机处于**同一网络**。
 - 支持 Linux、macOS 和 Windows。摄像头网关 [go2rtc](https://github.com/AlexxIT/go2rtc) 会根据系统和 CPU 自动下载，并校验文件哈希。
-- 可选：[Creality Print](https://www.creality.com/download) 7.3+，用于在应用中切片模型文件。将 `CREALITY_PRINT` 设置为其可执行文件路径。
 
 ## 快速开始
 
@@ -121,13 +120,13 @@ Windows 使用 `.venv\\Scripts\\python.exe` 作为命令。
 | 打印机     | `list_printers`、`printer_status`、`discover_printers`、`add_printer` |
 | 摄像头     | `camera_snapshot`（返回 Claude 可以检查的图片，例如 spaghetti、空热床等） |
 | 打印       | `start_print`、`pause_print`、`resume_print`、`stop_print`、`clear_error` |
-| 文件       | `list_files`、`send_file`（本地路径或 URL；STL/3MF 会被切片）、`delete_file`、`slicer_profiles` |
+| 文件       | `list_files`、`send_file`（仅 `.gcode`，可使用本地路径或 URL）、`delete_file` |
 | 控制       | `set_temperatures`、`set_fan`、`set_light`、`set_speed`、`move_axis`、`home_axes`、`send_gcode` |
 | 记录       | `print_history`、`print_stats`、`maintenance`、`mark_maintenance_done` |
 | 电源       | `plug_power` |
 
 示例指令：*“现在有打印机正在打印吗？”*、*“拍一张 K1 的照片，告诉我打印是否正常”*、
-*“将 ~/Downloads/benchy.stl 使用 PLA 切片，如果热床为空就在 Hi 上打印”*。
+*“把 ~/Downloads/benchy.gcode 发送到 Hi”*。
 
 ## 远程访问
 
@@ -146,7 +145,7 @@ PM_PASSWORD='change-me' python run.py
 Web 界面提供登录页面，会话存储在 SQLite 数据库中。
 
 - **首次运行**：打开 `/` 会跳转到 `/setup`，在此创建第一个**管理员**账户。
-- **管理员（admin）**：拥有全部权限，包括添加/编辑打印机、上传、控制、切片、维护、智能插座、
+- **管理员（admin）**：拥有全部权限，包括添加/编辑打印机、上传、控制、维护、智能插座、
   G-code 控制台、删除历史记录，以及**设置 → 用户管理**（创建用户、重置密码、修改角色）。
 - **普通用户（user）**：完全**只读**，只能访问监控、耗材、打印任务、温度和最近打印。其他 API 请求会返回 `403`，
   并且对应功能不会显示在界面中。
@@ -164,12 +163,11 @@ Web 界面提供登录页面，会话存储在 SQLite 数据库中。
 | `PM_PORT`             | `8000`                  | HTTP 端口 |
 | `PM_HOST`             | `0.0.0.0`               | 监听地址 |
 | `PM_PASSWORD`         | *(无)*                  | 机器密码（脚本、远程 MCP）：HTTP Basic 认证，拥有**管理员**权限 |
-| `PM_DATA_DIR`         | 操作系统用户数据目录¹ | SQLite 数据库、照片、go2rtc 和切片器数据目录 |
+| `PM_DATA_DIR`         | 操作系统用户数据目录¹ | SQLite 数据库、照片和 go2rtc 数据目录 |
 | `PM_CONFIG`           | `$PM_DATA_DIR/printers.json` | 打印机列表 |
 | `PM_SCAN_SUBNET`      | 自动（默认网卡的 `/24`） | 要扫描的子网，例如 `192.168.0.0/23` |
 | `PM_MCP_HOSTS`        | *(无)*                 | 允许访问 `/mcp/` 的其他主机名/IP |
 | `PM_URL`              | `http://127.0.0.1:8000` | stdio MCP 服务使用的应用地址 |
-| `CREALITY_PRINT`      | 自动                    | Creality Print 可执行文件路径 |
 | `GO2RTC`              | 自动下载                | go2rtc 可执行文件路径 |
 | `PM_GO2RTC_API_PORT`  | `19840`                 | go2rtc 本地 API 端口 |
 | `PM_GO2RTC_RTSP_PORT` | `19554`                 | go2rtc 本地 RTSP 端口 |
@@ -193,7 +191,7 @@ Windows `%APPDATA%\creality-printer-monitor`.
 | 错误信息             | `err.key` / `errcode`，使用 Creality Print 错误表（`creality_errors.json`）映射 |
 
 代码结构（`src/printermonitor/`）：`printer.py`（打印机连接）、`server.py`（Web API）、`mcp_server.py`（MCP 工具）、
-`discovery.py`（网络扫描）、`camera.py` + `go2rtc.py`（摄像头转发）、`slicer.py`（Creality Print）、`history.py` + `store.py`
+`discovery.py`（网络扫描）、`camera.py` + `go2rtc.py`（摄像头转发）、`history.py` + `store.py`
 （历史记录、设置、SQLite）、`plugs.py`（智能插座）、`errors.py`（错误信息）。Web 界面是 `frontend/` 中的 React
 应用（3D 查看器和模型图片位于 `frontend/public/`）；启动服务前执行一次
 `cd frontend && npm install && npm run build` 构建前端，Docker 会自动完成构建。
@@ -211,5 +209,4 @@ Windows `%APPDATA%\creality-printer-monitor`.
 
 ## 许可证
 
-[MIT](LICENSE)。包含 [three.js](https://threejs.org)（MIT）。运行时下载 [go2rtc](https://github.com/AlexxIT/go2rtc)（MIT），
-并可选使用 Creality Print（相关组件不随项目重新分发）。
+[MIT](LICENSE)。包含 [three.js](https://threejs.org)（MIT）。运行时下载 [go2rtc](https://github.com/AlexxIT/go2rtc)（MIT）。

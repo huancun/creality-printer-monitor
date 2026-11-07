@@ -652,7 +652,7 @@ export function FilesCard({ printer, isAdmin, notify }) {
     if (!isAdmin || !fileList?.length) return;
     for (const file of fileList) {
       if (!file.name.toLowerCase().endsWith(".gcode")) {
-        notify("打印机文件区仅支持 .gcode 文件（模型请到“文件库”切片）");
+        notify("仅支持上传 .gcode 文件；请先在切片软件中导出 G-code");
         continue;
       }
       const body = new FormData();

@@ -8,6 +8,7 @@ import os
 import re
 import secrets
 import shutil
+import tempfile
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -20,10 +21,10 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import discovery, plugs, slicer
+from . import discovery, plugs
 from .camera import BOUNDARY, CameraRelay
 from .go2rtc import go2rtc
-from .history import Tracker, parse_gcode_meta
+from .history import Tracker
 from .printer import Printer, derive_state, safe_gcode_name
 from .paths import CONFIG, MCP_TOKEN
 from .store import Store
@@ -237,7 +238,7 @@ PUBLIC_PATHS = {
 }
 
 # What a regular (read-only) user may GET: monitoring, jobs, temperature, recent
-# prints. Everything else in the API — settings, discovery, users, slicer… — is admin-only.
+# prints. Everything else in the API — settings, discovery, users… — is admin-only.
 _USER_GET_OK = (
     r"^/api/printers(?:/|$)",  # list, camera, snapshot, thumb, temps, files
     r"^/api/history(?:/|$)",   # recent prints and their media
@@ -894,124 +895,22 @@ async def api_plug_set(pid: str, body: PlugIn):
     return {"ok": True}
 
 
-# ---------- slicing and sending (one or more printers) ----------
-SLICED_DIR_NAME = "sliced"
-MODEL_EXT = (".stl", ".3mf", ".obj", ".step", ".stp")
-
-
-def sliced_dir() -> Path:
-    d = store.dir / SLICED_DIR_NAME
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
-
-@app.get("/api/slicer")
-async def api_slicer(model: str | None = None):
-    st = slicer.status()
-    st["catalog"] = slicer.catalog(model or "Creality Hi") if st["available"] else None
-    return st
-
-
-@app.post("/api/slicer/install")
-async def api_slicer_install():
-    asyncio.create_task(slicer.install(lambda: _broadcast({"type": "slicer", "install": slicer.install_state})))
-    return slicer.install_state
-
-
-@app.post("/api/slice")
-async def api_slice(
-    file: UploadFile = File(...),
-    machine: str = Form(...),
-    process: str = Form(...),
-    filament: str = Form(...),
-    thumb300: str = Form(""),
-    thumb96: str = Form(""),
-):
-    """Slice a 3D model; the G-code stays on the server for the preview and the upload."""
-    filename = Path(file.filename or "model.stl").name
-    if Path(filename).suffix.lower() not in MODEL_EXT:
-        raise HTTPException(400, "支持的格式：.stl、.3mf、.obj、.step")
-    if not slicer.find_binary():
-        raise HTTPException(400, "尚未安装 Creality Print 7.3+（请前往“设置 → 切片”查看安装说明）。")
-    workdir = slicer.new_workdir()
-    src = workdir / re.sub(r"[^\w.\-()+]", "_", filename)
-    with src.open("wb") as fh:
-        shutil.copyfileobj(file.file, fh)
-    thumbs = []
-    for b64 in (thumb300, thumb96):
-        if b64:
-            try:
-                png = base64.b64decode(b64.split(",", 1)[-1])
-                if png[:8] == b"\x89PNG\r\n\x1a\n":
-                    thumbs.append(png)
-            except ValueError:
-                pass
-    job_id = uuid.uuid4().hex[:10]
-    jobs[job_id] = {"id": job_id, "kind": "slice", "file": filename, "step": "slicing", "error": None}
-    asyncio.create_task(_slice_job(job_id, src, machine, process, filament, thumbs, workdir))
-    return jobs[job_id]
-
-
-async def _slice_job(job_id: str, src: Path, machine: str, process: str, filament: str, thumbs: list[bytes], workdir: Path) -> None:
-    try:
-        gcode = await slicer.slice_model(src, machine, process, filament, workdir)
-        if thumbs:
-            slicer.inject_thumbnails(gcode, thumbs)
-        token = uuid.uuid4().hex
-        name = safe_gcode_name(src.stem + ".gcode")
-        target = sliced_dir() / f"{token}.gcode"
-        shutil.move(gcode, target)
-        (sliced_dir() / f"{token}.json").write_text(json.dumps({"name": name}), encoding="utf-8")
-        meta = parse_gcode_meta(target.read_text(encoding="utf-8", errors="replace")[-300_000:])
-        set_job(job_id, step="done", token=token, gcode=name, meta=meta)
-    except Exception as e:
-        log.exception("slicing %s", job_id)
-        set_job(job_id, step="error", error=str(e) or type(e).__name__)
-    finally:
-        shutil.rmtree(workdir, ignore_errors=True)
-        _cleanup_sliced()
-
-
-def _cleanup_sliced(max_age: float = 86400) -> None:
-    for f in sliced_dir().glob("*"):
-        if time.time() - f.stat().st_mtime > max_age:
-            f.unlink(missing_ok=True)
-
-
-@app.get("/api/sliced/{token}")
-async def api_sliced(token: str):
-    path = sliced_dir() / f"{token}.gcode"
-    if not re.fullmatch(r"[0-9a-f]{32}", token) or not path.exists():
-        raise HTTPException(404, "未找到切片文件（可能已过期）")
-    return FileResponse(path, media_type="text/plain")
-
-
+# ---------- send G-code (one or more printers) ----------
 @app.post("/api/send")
 async def api_send(
     printers_ids: str = Form(..., alias="printers"),
     start: bool = Form(False),
-    token: str = Form(""),
     file: UploadFile | None = File(None),
 ):
-    """Send a G-code (uploaded file, or sliced earlier) to one or more printers."""
+    """Send an uploaded G-code file to one or more printers."""
     targets = [get_printer(pid) for pid in dict.fromkeys(x for x in printers_ids.split(",") if x)]
     if not targets:
         raise HTTPException(400, "请至少选择一台打印机。")
-    workdir = slicer.new_workdir()
-    if token:
-        src = sliced_dir() / f"{token}.gcode"
-        if not re.fullmatch(r"[0-9a-f]{32}", token) or not src.exists():
-            raise HTTPException(404, "未找到切片文件（可能已过期）")
-        name = json.loads((sliced_dir() / f"{token}.json").read_text(encoding="utf-8"))["name"]
-    elif file is not None:
-        name = Path(file.filename or "file.gcode").name
-        if Path(name).suffix.lower() != ".gcode":
-            raise HTTPException(400, "请上传 .gcode 文件，或先对模型进行切片")
-        src = workdir / "upload.gcode"
-        with src.open("wb") as fh:
-            shutil.copyfileobj(file.file, fh)
-    else:
-        raise HTTPException(400, "未选择文件")
+    if file is None:
+        raise HTTPException(400, "请选择 .gcode 文件")
+    name = Path(file.filename or "file.gcode").name
+    if Path(name).suffix.lower() != ".gcode":
+        raise HTTPException(400, "仅支持上传 .gcode 文件")
     try:
         name = safe_gcode_name(name)
     except ValueError as e:
@@ -1020,6 +919,14 @@ async def api_send(
         busy = [p.name for p in targets if derive_state(p.data, p.online) in plugs.BUSY or not p.online]
         if busy:
             raise HTTPException(409, f"以下打印机当前不可用：{', '.join(busy)}")
+    workdir = Path(tempfile.mkdtemp(prefix="pm-send-"))
+    src = workdir / "upload.gcode"
+    try:
+        with src.open("wb") as fh:
+            shutil.copyfileobj(file.file, fh)
+    except Exception:
+        shutil.rmtree(workdir, ignore_errors=True)
+        raise
     job_id = uuid.uuid4().hex[:10]
     jobs[job_id] = {
         "id": job_id, "kind": "send", "file": name, "step": "uploading", "error": None, "start": start,
@@ -1064,7 +971,7 @@ async def _send_job(job_id: str, targets: list[Printer], src: Path, name: str, s
 @app.post("/api/printers/{pid}/upload")
 async def api_upload(pid: str, file: UploadFile = File(...), start: bool = Form(False)):
     """Upload a .gcode from a printer's view (shortcut for /api/send)."""
-    return await api_send(printers_ids=pid, start=start, token="", file=file)
+    return await api_send(printers_ids=pid, start=start, file=file)
 
 
 @app.websocket("/api/ws")
