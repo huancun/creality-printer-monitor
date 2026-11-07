@@ -356,7 +356,7 @@ def build(client: Client | None = None) -> MCPServer:
     ) -> str:
         """Send a file to one or more printers, and start printing if `start`.
         A .gcode is sent as is; a 3D model (.stl, .3mf, .obj, .step) is sliced first
-        with the printer's OrcaSlicer profiles (see `slicer_profiles`).
+        with the printer's Creality Print profiles (see `slicer_profiles`).
 
         Args:
             printers: names of the target printers.
@@ -382,7 +382,7 @@ def build(client: Client | None = None) -> MCPServer:
             model = targets[0].get("model") or "Creality Hi"
             st = await api.get("/api/slicer", params={"model": model})
             if not st.get("available"):
-                raise ToolError("OrcaSlicer is not installed (Settings → Slicing): send a .gcode instead.")
+                raise ToolError("Creality Print is not installed (Settings → Slicing): send a .gcode instead.")
             cat = st["catalog"]
             if not cat.get("machine"):
                 raise ToolError(f'no slicing profiles for "{model}"')
@@ -457,7 +457,7 @@ def build(client: Client | None = None) -> MCPServer:
 
     @mcp.tool(annotations=READ, structured_output=False)
     async def slicer_profiles(printer: str = "") -> str:
-        """Process (quality) and filament profiles available for slicing (official OrcaSlicer profiles).
+        """Process (quality) and filament profiles available for slicing (official Creality Print profiles).
 
         Args:
             printer: printer whose profiles to list (default: Creality Hi).
@@ -465,7 +465,7 @@ def build(client: Client | None = None) -> MCPServer:
         model = (await api.find(printer)).get("model") if printer else "Creality Hi"
         st = await api.get("/api/slicer", params={"model": model or "Creality Hi"})
         if not st.get("available"):
-            return "OrcaSlicer is not installed (Settings → Slicing in the app)."
+            return "Creality Print is not installed (Settings → Slicing in the app)."
         c = st["catalog"]
         return f"Machine: {c['machine']}\nProcesses: {', '.join(c['processes'])}\nFilaments: {', '.join(c['filaments'])}"
 

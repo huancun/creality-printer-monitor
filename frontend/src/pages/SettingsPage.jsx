@@ -266,13 +266,13 @@ function SlicerCard() {
   return (
     <div>
       <p className="text-xs leading-relaxed text-muted">
-        如需在应用中直接切片 .stl / .3mf 文件，请安装 Creality Print 7.3 或更高版本，并将其可执行文件路径设置到 <code className="rounded bg-ink px-1">CREALITY_PRINT</code>。K3 的多喷嘴和混色配置由 Creality Print 提供。
+        应用会从 Creality Print GitHub Releases 获取最新的 Linux x86_64 AppImage 并安装。K3 的多喷嘴和混色配置由 Creality Print 提供。
       </p>
       {installState.step === "error" && (
         <p className="mt-2 rounded-lg border border-red-400/30 bg-red-400/[.07] px-3 py-2 text-[11px] text-red-300">{installState.error}</p>
       )}
       <button onClick={install} disabled={busy} className={`${primaryBtn} mt-3 disabled:opacity-50`}>
-        {busy ? "正在检查…" : "查看安装说明"}
+        {busy ? "正在启动安装…" : "安装最新 Creality Print"}
       </button>
     </div>
   );

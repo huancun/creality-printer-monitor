@@ -16,7 +16,7 @@ def main() -> None:
     uvicorn.run(
         "printermonitor.server:app",
         # Standard asyncio loop, not uvloop: uvloop spawns subprocesses (go2rtc,
-        # OrcaSlicer) in a way that can hang the whole server while other threads
+        # Creality Print) in a way that can hang the whole server while other threads
         # are running (camera video decoding). Reproduced on 2026-10-08.
         loop="asyncio",
         host=os.environ.get("PM_HOST", "0.0.0.0"),

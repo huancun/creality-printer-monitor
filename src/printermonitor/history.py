@@ -31,7 +31,7 @@ FILAMENT_DIAMETER = 1.75
 
 
 def parse_gcode_meta(text: str) -> dict[str, Any]:
-    """Slicer info from the comments (OrcaSlicer / Creality Print / PrusaSlicer)."""
+    """Slicer info from Creality Print comments."""
     meta: dict[str, Any] = {}
 
     def find(pattern: str) -> str | None:

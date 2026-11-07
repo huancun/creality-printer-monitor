@@ -1,6 +1,6 @@
 """Local connection to a Creality OS printer (Hi, K1, K2…).
 
-Protocol (same as Creality Print / OrcaSlicer):
+Protocol used by Creality Print:
   - WebSocket  ws://<ip>:9999           pushed telemetry + commands {"method": "set"|"get", "params": {...}}
   - HTTP POST  http://<ip>/upload/<name> G-code upload (multipart, "file" field)
   - HTTP GET   http://<ip>/info          printer model

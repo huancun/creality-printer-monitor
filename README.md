@@ -170,7 +170,6 @@ Web 界面提供登录页面，会话存储在 SQLite 数据库中。
 | `PM_MCP_HOSTS`        | *(无)*                 | 允许访问 `/mcp/` 的其他主机名/IP |
 | `PM_URL`              | `http://127.0.0.1:8000` | stdio MCP 服务使用的应用地址 |
 | `CREALITY_PRINT`      | 自动                    | Creality Print 可执行文件路径 |
-| `SLICER_BACKEND`      | `creality`              | 仅兼容旧版 OrcaSlicer 时设置为 `orca` |
 | `GO2RTC`              | 自动下载                | go2rtc 可执行文件路径 |
 | `PM_GO2RTC_API_PORT`  | `19840`                 | go2rtc 本地 API 端口 |
 | `PM_GO2RTC_RTSP_PORT` | `19554`                 | go2rtc 本地 RTSP 端口 |
@@ -180,7 +179,7 @@ Windows `%APPDATA%\creality-printer-monitor`.
 
 ## 工作原理
 
-应用使用 Creality Print / OrcaSlicer 使用的本地协议：
+应用使用 Creality Print 使用的本地协议：
 
 | 功能                 | 打印机端点 |
 |----------------------|------------------|
@@ -213,4 +212,4 @@ Windows `%APPDATA%\creality-printer-monitor`.
 ## 许可证
 
 [MIT](LICENSE)。包含 [three.js](https://threejs.org)（MIT）。运行时下载 [go2rtc](https://github.com/AlexxIT/go2rtc)（MIT），
-并可选使用 [OrcaSlicer](https://github.com/SoftFever/OrcaSlicer)（AGPL-3.0）；这些组件均不随项目重新分发。
+并可选使用 Creality Print（相关组件不随项目重新分发）。
