@@ -127,7 +127,7 @@ function PrinterGridCard({ printer, onOpen }) {
   );
 }
 
-export default function PrintersPage({ printers, isAdmin, notify, onAdd, initialSelectedId }) {
+export default function PrintersPage({ printers, isAdmin, notify, onAdd, initialSelectedId, onDetailClose }) {
   const [selectedId, setSelectedId] = useState(null);
   const selected = printers.find((printer) => printer.id === selectedId) || null;
 
@@ -185,7 +185,7 @@ export default function PrintersPage({ printers, isAdmin, notify, onAdd, initial
           printer={selected}
           isAdmin={isAdmin}
           notify={notify}
-          onClose={() => setSelectedId(null)}
+          onClose={onDetailClose || (() => setSelectedId(null))}
         />
       )}
     </div>

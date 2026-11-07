@@ -6,10 +6,10 @@ import FilesPage from "./pages/FilesPage.jsx";
 import SettingsPage from "./pages/SettingsPage.jsx";
 
 const navItems = [
-  { label: "总览", icon: "◫" },
-  { label: "打印机", icon: "▦", count: "03" },
-  { label: "打印历史", icon: "◷" },
-  { label: "文件库", icon: "▤" },
+  { label: "总览" },
+  { label: "打印机", count: "03" },
+  { label: "打印历史" },
+  { label: "文件库" },
 ];
 
 function AuthScreen({ setup, onAuthenticated }) {
@@ -90,15 +90,14 @@ function Sidebar({ active, onNavigate, printerCount, onlineCount, isAdmin }) {
               active === item.label ? "bg-[#1c222b] text-white" : "text-[#9298a5] hover:bg-white/[.04] hover:text-white"
             }`}
           >
-            <Icon className={active === item.label ? "text-lime" : ""}>{item.icon}</Icon>
             <span className="flex-1">{item.label}</span>
             {item.count && <span className="text-[10px] text-[#777d8a]">{String(printerCount).padStart(2, "0")}</span>}
           </button>
         ))}
       </nav>
       <div className="mb-3 mt-10 px-3 text-[10px] font-semibold uppercase tracking-[.18em] text-[#666c79]">管理</div>
-      {isAdmin && <button onClick={() => onNavigate("设置")} className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[#9298a5] transition hover:bg-white/[.04] hover:text-white">
-        <Icon>⚙</Icon> 设置
+      {isAdmin && <button onClick={() => onNavigate("设置")} className="flex items-center rounded-xl px-3 py-2.5 text-left text-[13px] text-[#9298a5] transition hover:bg-white/[.04] hover:text-white">
+        设置
       </button>}
       <div className="mt-auto rounded-2xl border border-line bg-[#11141a] p-4">
         <div className="flex items-center justify-between">
@@ -493,6 +492,11 @@ function App() {
     setActive("打印机");
   };
 
+  const closeOverviewPrinter = () => {
+    setSelectedPrinterId(null);
+    setActive("总览");
+  };
+
   if (session.checking) {
     return <main className="grid min-h-screen place-items-center text-sm text-muted">正在连接服务…</main>;
   }
@@ -617,7 +621,7 @@ function App() {
             </aside>
           </div>
           </>)}
-          {active === "打印机" && <PrintersPage printers={printerList} isAdmin={isAdmin} notify={notify} onAdd={() => setAddOpen(true)} initialSelectedId={selectedPrinterId} />}
+          {active === "打印机" && <PrintersPage printers={printerList} isAdmin={isAdmin} notify={notify} onAdd={() => setAddOpen(true)} initialSelectedId={selectedPrinterId} onDetailClose={selectedPrinterId ? closeOverviewPrinter : undefined} />}
           {active === "打印历史" && <HistoryPage printers={printerList} isAdmin={isAdmin} notify={notify} />}
           {active === "文件库" && <FilesPage printers={printerList} isAdmin={isAdmin} notify={notify} onNavigate={setActive} />}
           {active === "设置" && <SettingsPage printers={printerList} user={session.user} notify={notify} />}
