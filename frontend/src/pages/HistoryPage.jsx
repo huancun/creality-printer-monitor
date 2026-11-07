@@ -11,7 +11,7 @@ const STATUS_PILL = {
 
 const rowCost = (row) => (num(row.cost_filament) ?? 0) + (num(row.cost_energy) ?? 0);
 
-function HistoryRow({ row, isAdmin, onDelete, showPrinter }) {
+function HistoryRow({ row, isAdmin, onDelete, onView, showPrinter }) {
   const cost = rowCost(row);
   const hasImage = Boolean(row.photo || row.thumb);
   return (
@@ -55,6 +55,10 @@ function HistoryRow({ row, isAdmin, onDelete, showPrinter }) {
         {row.error_title && <div className="mt-1 truncate text-[10px] text-red-300">{row.error_title}</div>}
       </div>
       <div className="flex shrink-0 items-center gap-3">
+        <button
+          onClick={() => onView(row)}
+          className="rounded-lg border border-line px-2 py-1.5 text-[10px] text-[#c2c6ce] transition hover:bg-white/[.06]"
+        >详情</button>
         <span className={`rounded-full px-2.5 py-1 text-[10px] ${STATUS_PILL[row.status] || "bg-white/[.05] text-[#9298a5]"}`}>
           {STATUS_LABEL[row.status] || row.status}
           {row.status !== "completed" && row.progress ? ` ${row.progress} %` : ""}
@@ -154,6 +158,7 @@ export default function HistoryPage({ printers, isAdmin, notify }) {
   const [status, setStatus] = useState("");
   const [metric, setMetric] = useState("hours");
   const [loadError, setLoadError] = useState("");
+  const [selectedPrint, setSelectedPrint] = useState(null);
 
   const load = async () => {
     setLoadError("");
@@ -228,6 +233,10 @@ export default function HistoryPage({ printers, isAdmin, notify }) {
       notify(error.message);
     }
   };
+
+  const selectedFilaments = selectedPrint?.filament_breakdown || [];
+  const estimatedTotal = selectedFilaments.reduce((total, item) => total + (num(item.estimated_g) ?? 0), 0);
+  const actualTotal = num(selectedPrint?.filament_g);
 
   return (
     <div>
@@ -359,7 +368,7 @@ export default function HistoryPage({ printers, isAdmin, notify }) {
         ) : filtered.length ? (
           <div className="space-y-2">
             {filtered.map((row) => (
-              <HistoryRow key={row.id} row={row} isAdmin={isAdmin} onDelete={removeRow} showPrinter={!printerId} />
+              <HistoryRow key={row.id} row={row} isAdmin={isAdmin} onDelete={removeRow} onView={setSelectedPrint} showPrinter={!printerId} />
             ))}
           </div>
         ) : (
@@ -369,6 +378,75 @@ export default function HistoryPage({ printers, isAdmin, notify }) {
           </div>
         )}
       </section>
+
+      {selectedPrint && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4" onClick={() => setSelectedPrint(null)}>
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="history-detail-title"
+            className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-line bg-[#11141a] p-5 shadow-2xl sm:p-6"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <h2 id="history-detail-title" className="truncate text-base font-semibold text-white">{prettyName(selectedPrint.file) || "打印详情"}</h2>
+                <p className="mt-1 text-[11px] text-muted">{formatDate(selectedPrint.started_at)}{selectedPrint.duration_s ? ` · ${formatDuration(selectedPrint.duration_s)}` : ""}</p>
+              </div>
+              <button onClick={() => setSelectedPrint(null)} aria-label="关闭详情" className="shrink-0 rounded-lg border border-line px-2.5 py-1.5 text-xs text-muted hover:bg-white/[.05]">✕</button>
+            </div>
+
+            <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <div className="rounded-xl border border-line bg-panel p-3"><div className="text-[10px] text-muted">总耗材</div><div className="mt-1 text-sm font-semibold text-white">{formatGrams(selectedPrint.filament_g)}</div></div>
+              <div className="rounded-xl border border-line bg-panel p-3"><div className="text-[10px] text-muted">耗材费用</div><div className="mt-1 text-sm font-semibold text-white">{formatMoney(selectedPrint.cost_filament)}</div></div>
+              <div className="col-span-2 rounded-xl border border-line bg-panel p-3 sm:col-span-1"><div className="text-[10px] text-muted">总费用（含电费）</div><div className="mt-1 text-sm font-semibold text-white">{formatMoney(rowCost(selectedPrint))}</div></div>
+            </div>
+
+            {selectedFilaments.length ? (
+              <>
+                <h3 className="mt-6 text-xs font-semibold text-white">耗材明细</h3>
+                <div className="mt-2 overflow-x-auto rounded-xl border border-line">
+                  <table className="w-full min-w-[560px] text-left text-[11px]">
+                    <thead className="bg-panel text-[10px] text-muted">
+                      <tr>
+                        <th className="px-3 py-2 font-medium">耗材配置</th>
+                        <th className="px-3 py-2 text-right font-medium">切片预估</th>
+                        <th className="px-3 py-2 text-right font-medium">预估占比</th>
+                        <th className="px-3 py-2 text-right font-medium">分摊用量</th>
+                        <th className="px-3 py-2 text-right font-medium">单价/kg</th>
+                        <th className="px-3 py-2 text-right font-medium">费用</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedFilaments.map((item, index) => {
+                        const estimate = num(item.estimated_g) ?? 0;
+                        return (
+                          <tr key={`${item.profile || item.type}-${index}`} className="border-t border-line text-[#c8ccd4]">
+                            <td className="max-w-[210px] truncate px-3 py-2.5">
+                              <span className="inline-flex items-center gap-2">
+                                {/^#[0-9a-f]{6}$/i.test(item.color || "") && <i className="h-2.5 w-2.5 shrink-0 rounded-full border border-white/20" style={{ backgroundColor: item.color }} />}
+                                <span className="truncate">{item.profile || item.type || `耗材 ${index + 1}`}</span>
+                              </span>
+                            </td>
+                            <td className="px-3 py-2.5 text-right">{formatGrams(estimate)}</td>
+                            <td className="px-3 py-2.5 text-right">{estimatedTotal ? `${(estimate / estimatedTotal * 100).toFixed(1)}%` : "—"}</td>
+                            <td className="px-3 py-2.5 text-right">{formatGrams(item.grams)}</td>
+                            <td className="px-3 py-2.5 text-right">{item.price_kg == null ? "—" : formatMoney(item.price_kg)}</td>
+                            <td className="px-3 py-2.5 text-right">{item.cost == null ? "—" : formatMoney(item.cost)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="mt-2 text-[10px] leading-relaxed text-muted">分摊用量按切片预估占比计算{actualTotal == null ? "；打印机总用量尚不可用" : "，逐耗材数值为估算"}。</p>
+              </>
+            ) : (
+              <p className="mt-6 rounded-xl border border-line bg-panel p-4 text-xs leading-relaxed text-muted">这条历史记录没有保存 G-code 的逐耗材信息，无法显示各耗材占比、单价和费用。新打印任务读取到切片信息后会显示明细。</p>
+            )}
+          </section>
+        </div>
+      )}
     </div>
   );
 }
