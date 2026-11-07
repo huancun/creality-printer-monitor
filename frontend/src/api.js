@@ -144,7 +144,7 @@ export const degrees = (value) => {
 };
 
 export const formatMoney = (value) =>
-  (Number(value) || 0).toLocaleString("zh-CN", { style: "currency", currency: "EUR" });
+  (Number(value) || 0).toLocaleString("zh-CN", { style: "currency", currency: "CNY" });
 
 export const formatGrams = (value) => {
   const n = Number(value);

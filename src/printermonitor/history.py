@@ -26,6 +26,7 @@ log = logging.getLogger(__name__)
 
 ACTIVE = {"printing", "paused", "processing", "self_test"}
 SAVE_EVERY = 60  # s: duration/progress of running prints saved to the database
+STALE_ACTIVE_WINDOW = 45  # s: ignore a late active report after a print has ended
 FILAMENT_DIAMETER = 1.75
 
 
@@ -84,6 +85,7 @@ class Tracker:
         self._open: dict[str, int] = {}  # printer id -> id of the running row
         self._last_save: dict[str, float] = {}
         self._last: dict[str, dict[str, Any]] = {}  # last values seen during the print
+        self._closed: dict[str, dict[str, Any]] = {}  # last closed print, for stale telemetry
 
     # ---------- tracking ----------
     def update(self, p: Printer) -> None:
@@ -98,10 +100,17 @@ class Tracker:
 
         if state in ACTIVE and key:
             if rec_id is not None and self.store.get_print(rec_id)["print_key"] != key:
-                self._close(p, rec_id, "failed")  # another print replaced the previous one
-                rec_id = None
+                rec = self.store.get_print(rec_id) or {}
+                if self._same_run_with_new_key(p, rec):
+                    # Some slicer/printer combinations refresh printStartTime or printId
+                    # while the same print is still running. Do not split that print.
+                    self.store.update_print(rec_id, print_key=key)
+                else:
+                    self._close(p, rec_id, "failed")  # another print replaced the previous one
+                    rec_id = None
             if rec_id is None:
-                self._start(p, key)
+                if not self._is_stale_active(p):
+                    self._start(p, key)
             else:
                 self._remember(p)
                 self._save_progress(p, rec_id)
@@ -120,6 +129,39 @@ class Tracker:
         if not name:
             return None
         return f"{name}|{d.get('printId') or d.get('printStartTime') or ''}"
+
+    def _same_run_with_new_key(self, p: Printer, rec: dict[str, Any]) -> bool:
+        """Keep one history row when only the firmware task id changed."""
+        file = Path(str(p.data.get("printFileName") or "")).name
+        if not file or file != rec.get("file"):
+            return False
+        try:
+            job_time = float(p.data.get("printJobTime") or 0)
+            previous = float(self._last.get(p.id, {}).get("printJobTime") or 0)
+            progress = float(p.data.get("printProgress") or 0)
+            previous_progress = float(self._last.get(p.id, {}).get("printProgress") or 0)
+        except (TypeError, ValueError):
+            return False
+        # A running print should not jump backwards materially just because its
+        # printStartTime/printId was refreshed by the printer.
+        return job_time >= max(0, previous - 10) and progress >= max(0, previous_progress - 10)
+
+    def _is_stale_active(self, p: Printer) -> bool:
+        """Ignore a delayed active packet belonging to the just-finished print."""
+        closed = self._closed.get(p.id)
+        if not closed or time.monotonic() - closed["closed_at"] > STALE_ACTIVE_WINDOW:
+            return False
+        file = Path(str(p.data.get("printFileName") or "")).name
+        if file != closed.get("file"):
+            return False
+        try:
+            job_time = float(p.data.get("printJobTime") or 0)
+            progress = float(p.data.get("printProgress") or 0)
+        except (TypeError, ValueError):
+            return True
+        # A new job must visibly reset its counters. Otherwise this is most
+        # likely a late/replayed status packet from the completed job.
+        return job_time >= max(0, closed["duration"] - 10) or progress >= 95
 
     def _remember(self, p: Printer) -> None:
         d = p.data
@@ -183,6 +225,12 @@ class Tracker:
         if status != "completed" and (err := last.get("error")):
             fields["error_code"], fields["error_title"] = err["code"], err["title"]
         self.store.update_print(rec_id, **fields)
+        self._closed[p.id] = {
+            "file": rec.get("file"),
+            "closed_at": time.monotonic(),
+            "duration": duration,
+            "progress": progress,
+        }
         log.info("%s: print #%d %s (%d s)", p.name, rec_id, status, duration)
         asyncio.ensure_future(self._final_photo(p, rec_id))
         self.on_finish(p, {**rec, **fields})
