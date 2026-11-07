@@ -33,6 +33,13 @@ CREALITY_DIR = DATA_DIR / "creality-print"
 VENDOR = "Creality"
 CREALITY_RELEASES_API = "https://api.github.com/repos/CrealityOfficial/CrealityPrint/releases/latest"
 
+# Firmware model codes can also be passed directly by callers that have not
+# gone through Printer.snapshot().  Creality Print profile names vary slightly
+# between releases, so machine_name() matches their normalized form below.
+MODEL_ALIASES = {
+    "F039": "K3",
+}
+
 install_state: dict[str, Any] = {"step": None, "progress": 0, "error": None}
 
 
@@ -229,11 +236,42 @@ def machine_name(model: str | None, nozzle: str = "0.4") -> str | None:
     """Resolve a Creality Print machine profile for a printer model."""
     if not model:
         return None
-    # Creality Print uses both plain and parenthesized nozzle names.
+
+    model = MODEL_ALIASES.get(model.upper(), model).strip()
+    idx = _index()
+
+    # Creality Print uses both plain and parenthesized nozzle names.  Keep the
+    # exact lookup first because it is deterministic and handles the common
+    # profile names without inspecting unrelated profiles.
+    candidates = []
     for prefix in ("", "Creality "):
-        for candidate in (f"{prefix}{model} {nozzle} nozzle", f"{prefix}{model} ({nozzle} nozzle)"):
-            if ("machine", candidate) in _index():
-                return candidate
+        candidates.extend((
+            f"{prefix}{model} {nozzle} nozzle",
+            f"{prefix}{model} ({nozzle} nozzle)",
+        ))
+    for candidate in candidates:
+        if ("machine", candidate) in idx:
+            return candidate
+
+    def compact(value: str) -> str:
+        return re.sub(r"[^a-z0-9.]", "", value.lower())
+
+    def words(value: str) -> str:
+        return re.sub(r"[^a-z0-9.]+", " ", value.lower()).strip()
+
+    model_words = words(model)
+    nozzle_key = compact(nozzle)
+    for kind, name in idx:
+        if kind != "machine":
+            continue
+        key = words(name)
+        # Accept release-specific punctuation/prefix differences, but require
+        # both the complete model token and the requested nozzle size.  This
+        # prevents K3 from accidentally selecting K3 Pro or another nozzle.
+        if re.search(rf"(?:^| ){re.escape(model_words)}(?: |$)", key) and re.search(
+            rf"(?:^| ){re.escape(nozzle_key)} nozzle(?: |$)", key
+        ):
+            return name
     return None
 
 

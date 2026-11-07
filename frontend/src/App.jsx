@@ -536,7 +536,7 @@ function App() {
           <div className="h-full w-[260px] border-r border-line bg-[#0c0e13] p-5" onClick={(event) => event.stopPropagation()}>
             <div className="mb-8 flex items-center justify-between"><span className="text-sm font-semibold">CREALITY MONITOR</span><button onClick={() => setMobileMenu(false)} aria-label="关闭菜单">✕</button></div>
             {navItems.map((item) => <button key={item.label} onClick={() => navigate(item.label)} className={`flex w-full gap-3 rounded-xl px-3 py-3 text-left text-sm ${active === item.label ? "bg-[#1c222b] text-lime" : "text-muted"}`}><Icon>{item.icon}</Icon>{item.label}</button>)}
-            {isAdmin && <button onClick={() => navigate("设置")} className={`flex w-full gap-3 rounded-xl px-3 py-3 text-left text-sm ${active === "设置" ? "bg-[#1c222b] text-lime" : "text-muted"}`}><Icon>⚙</Icon>设置</button>}
+            {isAdmin && <button onClick={() => navigate("设置")} className={`flex w-full gap-3 rounded-xl px-3 py-3 text-left text-sm ${active === "设置" ? "bg-[#1c222b] text-lime" : "text-muted"}`}>设置</button>}
           </div>
         </div>}
 
