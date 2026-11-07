@@ -1,9 +1,9 @@
-"""STL/3MF -> G-code slicing with the OrcaSlicer command line.
+"""STL/3MF -> G-code slicing with Creality Print's command line.
 
-OrcaSlicer is installed on demand into data/orca (official AppImage extracted,
-checksum verified), or taken from the system. Profiles come from its system
-profiles (e.g. "Creality Hi 0.4 nozzle", "0.20mm Standard @Creality Hi",
-"Creality Generic PLA @Hi-all"): nothing to export by hand.
+Creality Print is used by default because its recent releases contain the K3
+multi-nozzle and multi-colour profiles. Set SLICER_BACKEND=orca to use the
+legacy OrcaSlicer path instead. Profiles come from the selected slicer's
+system profiles; nothing needs to be exported by hand.
 
 System profiles only store their differences from a parent (`inherits`), and
 the command line does NOT resolve that inheritance (density 0, wrong
@@ -30,6 +30,7 @@ import httpx
 from .paths import DATA_DIR
 
 ORCA_DIR = DATA_DIR / "orca"
+CREALITY_DIR = DATA_DIR / "creality-print"
 VERSION = "v2.4.2"
 ASSET = "OrcaSlicer_Linux_AppImage_Ubuntu2404_V2.4.2.AppImage"
 DIGEST = "d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd"
@@ -39,7 +40,11 @@ install_state: dict[str, Any] = {"step": None, "progress": 0, "error": None}
 
 
 # ---------- installation ----------
-def find_binary() -> str | None:
+def backend() -> str:
+    return os.environ.get("SLICER_BACKEND", "creality").strip().lower() or "creality"
+
+
+def find_orca_binary() -> str | None:
     if env := os.environ.get("ORCA_SLICER"):
         return env if Path(env).exists() or shutil.which(env) else None
     local = ORCA_DIR / "squashfs-root" / "AppRun"
@@ -57,18 +62,51 @@ def find_binary() -> str | None:
     return None
 
 
+def find_creality_binary() -> str | None:
+    if env := os.environ.get("CREALITY_PRINT"):
+        return env if Path(env).exists() or shutil.which(env) else None
+    for b in ("creality-print", "CrealityPrint", "crealityprint", "Creality Print"):
+        if p := shutil.which(b):
+            return p
+    for p in (
+        CREALITY_DIR / "squashfs-root" / "AppRun",
+        CREALITY_DIR / "CrealityPrint",
+        CREALITY_DIR / "CrealityPrint.AppImage",
+        Path("/usr/bin/CrealityPrint"),
+        Path("/opt/CrealityPrint/CrealityPrint"),
+        Path("/Applications/Creality Print.app/Contents/MacOS/Creality Print"),
+        Path(os.environ.get("ProgramFiles", r"C:\\Program Files")) / "Creality Print" / "CrealityPrint.exe",
+    ):
+        if p.exists():
+            return str(p)
+    return None
+
+
+def find_binary() -> str | None:
+    return find_orca_binary() if backend() == "orca" else find_creality_binary()
+
+
 def can_install() -> bool:
-    """The one-click install uses the official Linux x86-64 AppImage; elsewhere, install OrcaSlicer yourself."""
-    return sys.platform.startswith("linux") and platform.machine().lower() in ("x86_64", "amd64")
+    """Creality Print must be installed from its official platform package."""
+    return False
 
 
 def profiles_dir() -> Path | None:
-    candidates = [
-        ORCA_DIR / "squashfs-root" / "resources" / "profiles",
-        Path("/usr/share/OrcaSlicer/resources/profiles"),
-        Path("/usr/share/orca-slicer/resources/profiles"),
-        Path("/opt/orca-slicer/resources/profiles"),
-    ]
+    if backend() == "orca":
+        candidates = [
+            ORCA_DIR / "squashfs-root" / "resources" / "profiles",
+            Path("/usr/share/OrcaSlicer/resources/profiles"),
+            Path("/usr/share/orca-slicer/resources/profiles"),
+            Path("/opt/orca-slicer/resources/profiles"),
+        ]
+    else:
+        candidates = [
+            CREALITY_DIR / "squashfs-root" / "resources" / "profiles",
+            CREALITY_DIR / "resources" / "profiles",
+            Path("/usr/share/CrealityPrint/resources/profiles"),
+            Path("/usr/share/creality-print/resources/profiles"),
+            Path("/opt/CrealityPrint/resources/profiles"),
+        ]
     if b := find_binary():
         exe = Path(b).resolve()
         candidates[:0] = [
@@ -80,11 +118,15 @@ def profiles_dir() -> Path | None:
 
 
 async def install(on_change: Callable[[], None] = lambda: None) -> None:
-    """Download the official AppImage, verify its checksum and extract it (~380 MB)."""
+    """Explain how to install the selected slicer; no unofficial download is attempted."""
+    if backend() != "orca":
+        install_state.update(step="error", progress=0, error="请安装 Creality Print 7.3+，并将 CREALITY_PRINT 指向其可执行文件后重启应用")
+        on_change()
+        return
     if install_state["step"] in ("download", "extract"):
         return
     if not can_install():
-        install_state.update(step="error", progress=0, error="automatic install is Linux x86-64 only: install OrcaSlicer from orcaslicer.com")
+        install_state.update(step="error", progress=0, error="请手动安装 OrcaSlicer，并将 ORCA_SLICER 指向其可执行文件")
         on_change()
         return
     install_state.update(step="download", progress=0, error=None)
@@ -213,7 +255,8 @@ def catalog(model: str | None) -> dict[str, Any]:
 
 
 def status() -> dict[str, Any]:
-    return {"available": find_binary() is not None, "binary": find_binary(), "can_install": can_install(), "install": install_state}
+    binary = find_binary()
+    return {"backend": backend(), "available": binary is not None, "binary": binary, "can_install": can_install(), "install": install_state}
 
 
 # ---------- slicing ----------
@@ -240,7 +283,7 @@ def inject_thumbnails(gcode: Path, pngs: list[bytes]) -> None:
 async def slice_model(model_file: Path, machine: str, process: str, filament: str, workdir: Path) -> Path:
     binary = find_binary()
     if not binary:
-        raise RuntimeError("OrcaSlicer is not installed: install it in Settings, or upload a .gcode.")
+        raise RuntimeError("Creality Print is not installed: install it in Settings, or upload a .gcode.")
     paths = {}
     for kind, name in (("machine", machine), ("process", process), ("filament", filament)):
         p = workdir / f"{kind}.json"
@@ -250,12 +293,22 @@ async def slice_model(model_file: Path, machine: str, process: str, filament: st
     outdir.mkdir()
     datadir.mkdir()
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
+    if backend() == "orca":
+        args = [
+            "--datadir", str(datadir), "--slice", "0", "--arrange", "1", "--orient", "1", "--allow-newer-file",
+            "--load-settings", f"{paths['machine']};{paths['process']}",
+            "--load-filaments", str(paths["filament"]), "--outputdir", str(outdir), str(model_file),
+        ]
+    else:
+        # Creality Print uses underscores in these documented CLI options.
+        args = [
+            "--slice", "0", "--outputdir", str(outdir),
+            "--load_settings", f"{paths['machine']};{paths['process']}",
+            "--load_filaments", str(paths["filament"]), str(model_file),
+        ]
     proc = await asyncio.create_subprocess_exec(
-        binary, "--datadir", str(datadir), "--slice", "0", "--arrange", "1", "--orient", "1", "--allow-newer-file",
-        "--load-settings", f"{paths['machine']};{paths['process']}",
-        "--load-filaments", str(paths["filament"]),
-        "--outputdir", str(outdir), str(model_file),
-        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, env=env, cwd=workdir,
+        binary, *args, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        env=env, cwd=workdir,
     )
     await asyncio.wait_for(proc.wait(), timeout=900)
     result = {}

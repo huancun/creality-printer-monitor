@@ -932,7 +932,7 @@ async def api_slice(
     if Path(filename).suffix.lower() not in MODEL_EXT:
         raise HTTPException(400, "支持的格式：.stl、.3mf、.obj、.step")
     if not slicer.find_binary():
-        raise HTTPException(400, "尚未安装 OrcaSlicer（请前往“设置 → 切片”安装）。")
+        raise HTTPException(400, "尚未安装 Creality Print 7.3+（请前往“设置 → 切片”查看安装说明）。")
     workdir = slicer.new_workdir()
     src = workdir / re.sub(r"[^\w.\-()+]", "_", filename)
     with src.open("wb") as fh:

@@ -209,7 +209,7 @@ function SendCard({ printers, isAdmin, notify, onNavigate }) {
       fd.append("machine", catalog?.machine || "");
       fd.append("process", process);
       fd.append("filament", filamentChoice);
-      // Thumbnails are rendered here: OrcaSlicer's headless slicing doesn't produce any.
+      // Thumbnails are rendered here: headless Creality Print slicing doesn't produce any.
       if (viewerRef.current && ext === "stl") {
         try {
           fd.append("thumb300", await withTimeout(viewerRef.current.snapshot(300), 5000));
@@ -376,7 +376,7 @@ function SendCard({ printers, isAdmin, notify, onNavigate }) {
           <div className="mt-3 rounded-xl border border-amber-300/30 bg-amber-300/[.07] px-4 py-3 text-xs text-amber-100">
             {slicer.available === false ? (
               <>
-                尚未安装 OrcaSlicer。{isAdmin && (
+                尚未安装 Creality Print。{isAdmin && (
                   <button onClick={() => onNavigate("设置")} className="mx-1 underline">
                     {slicer.can_install === false ? "查看设置" : "前往设置安装"}
                   </button>
@@ -384,7 +384,7 @@ function SendCard({ printers, isAdmin, notify, onNavigate }) {
                 或直接发送 .gcode 文件。
               </>
             ) : (
-              <>没有适用于“{model}”的 OrcaSlicer 配置文件。</>
+              <>没有适用于“{model}”的 Creality Print 配置文件。</>
             )}
           </div>
         )}
@@ -553,7 +553,7 @@ function SendCard({ printers, isAdmin, notify, onNavigate }) {
                 )}
               </button>
               <p className="text-[10px] leading-relaxed text-muted">
-                切片在服务器上由 OrcaSlicer 完成，结果仅用于预览和发送，不会复制到打印机的硬盘。
+                切片在服务器上由 Creality Print 完成，结果仅用于预览和发送，不会复制到打印机的硬盘。
               </p>
             </div>
           ) : (

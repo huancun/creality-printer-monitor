@@ -1,4 +1,4 @@
-# Creality Printer Monitor
+# Creality 打印机监控
 
 [![CI](https://github.com/catmargiela/creality-printer-monitor/actions/workflows/ci.yml/badge.svg)](https://github.com/catmargiela/creality-printer-monitor/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.12%20%7C%203.13-3776AB?logo=python&logoColor=white)](https://www.python.org/)
@@ -8,43 +8,41 @@
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](#docker)
 [![Platforms](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)](#requirements)
 
-A local web dashboard **and an MCP server** for Creality OS 3D printers (**Creality Hi, K1 family, K2 family, K3**).
-It talks to the printers directly on your LAN with the same protocol as Creality Print, with **no Creality cloud account**.
+面向 Creality OS 3D 打印机（**Creality Hi、K1 系列、K2 系列、K3**）的本地 Web 控制面板**及 MCP 服务**。
+它使用与 Creality Print 相同的协议直接连接局域网内的打印机，**无需 Creality 云账户**。
 
-- **Finds your printers on the network automatically**, and finds them again if your router gives them a new IP.
-- One dashboard for all printers: live camera, progress, temperatures, time left, loaded filament.
-- Pause / resume / stop, light, temperatures (including per-nozzle control on multi-nozzle models), fans, speed, axis moves, G-code console.
-- Drag & drop a file to upload and print it, or send one file to several printers at once.
-- Built-in slicing of `.stl` / `.3mf` / `.obj` / `.step` with OrcaSlicer's official Creality profiles, with a 3D preview.
-- Print history with costs (filament + power), monthly stats, maintenance reminders.
-- Smart plug support (Shelly, Tasmota): auto power-off once the print is done and the nozzle has cooled.
-- Clear error messages with advice (filament runout, AI spaghetti detection, clogs, power loss…).
-- **Control everything from Claude** (or any MCP client): status, camera snapshots Claude can look at, start/stop prints, upload files…
+- **自动发现局域网打印机**；即使路由器重新分配 IP，也能再次找到打印机。
+- 一个面板管理所有打印机：实时摄像头、进度、温度、剩余时间和已加载耗材。
+- 暂停、继续、停止、灯光、温度（包括多喷嘴独立控温）、风扇、速度、轴移动和 G-code 控制台。
+- 拖放文件即可上传打印，也可以将同一个文件发送到多台打印机。
+- 使用 Creality Print 官方配置对 `.stl`、`.3mf`、`.obj`、`.step` 文件切片，并提供 3D 预览。
+- 打印历史和费用统计（耗材与电费）、月度统计、维护提醒。
+- 支持智能插座（Shelly、Tasmota）：打印完成且喷嘴冷却后自动断电。
+- 提供清晰的错误信息和处理建议（耗材用尽、AI spaghetti 检测、堵头、断电等）。
+- **通过 Claude 控制全部功能**（或使用其他 MCP 客户端）：查看状态、读取摄像头、开始/停止打印、上传文件等。
 
-## Supported printers
+## 支持的打印机
 
-| Printer                          | Status & control | Camera            |
+| 打印机                          | 状态与控制 | 摄像头            |
 |----------------------------------|------------------|-------------------|
 | Creality Hi                      | ✅               | ✅ WebRTC (go2rtc) |
 | K2 / K2 Plus / K2 Pro            | ✅               | ✅ WebRTC (go2rtc) |
 | K3                               | ✅               | ✅ WebRTC (go2rtc) |
 | K1 / K1C / K1 SE / K1 Max        | ✅               | ✅ MJPEG           |
-| Other Creality OS printers (WebSocket on port 9999) | should work | depends on model |
+| 其他 Creality OS 打印机（9999 端口 WebSocket） | 应该可以工作 | 取决于型号 |
 
-Classic Marlin printers (Ender-3, Ender-3 V2…) have no network API and are not supported.
+传统 Marlin 打印机（Ender-3、Ender-3 V2 等）没有网络 API，因此暂不支持。
 
-## Requirements
+## 环境要求
 
-- Python **3.12+** and pip (or Docker).
-- The computer running the app must be on the **same network** as the printers.
-- Linux, macOS or Windows. The camera gateway ([go2rtc](https://github.com/AlexxIT/go2rtc)) is downloaded automatically
-  for your OS/CPU, with its checksum verified.
-- Optional: [OrcaSlicer](https://orcaslicer.com) to slice STL files from the app. On Linux x86-64 it installs in one click
-  from **Settings → Slicing**; on macOS / Windows install it normally and the app will find it.
+- Python **3.12+** 和 pip（或 Docker）。
+- 运行应用的电脑必须与打印机处于**同一网络**。
+- 支持 Linux、macOS 和 Windows。摄像头网关 [go2rtc](https://github.com/AlexxIT/go2rtc) 会根据系统和 CPU 自动下载，并校验文件哈希。
+- 可选：[Creality Print](https://www.creality.com/download) 7.3+，用于在应用中切片模型文件。将 `CREALITY_PRINT` 设置为其可执行文件路径。
 
-## Quick start
+## 快速开始
 
-Install from a clone with pip:
+从代码仓库克隆后使用 pip 安装：
 
 ```bash
 git clone https://github.com/catmargiela/creality-printer-monitor
@@ -58,28 +56,27 @@ python -m pip install -r requirements.txt
 python run.py
 ```
 
-Open <http://localhost:8000> (or `http://<computer-ip>:8000` from a phone on the same Wi-Fi).
+打开 <http://localhost:8000>（手机连接同一 Wi-Fi 时，可访问 `http://<电脑IP>:8000`）。
 
-The first time you open it, the app asks you to create the **admin account** (username + password). From then on
-you log in on the same page; the session stays valid for 30 days.
+首次打开时，应用会要求创建**管理员账户**（用户名和密码）。之后在同一页面登录，登录会话有效期为 30 天。
 
-On first launch the app **scans your local network** and adds every Creality printer it finds.
-You can add more later with **+ Printer** (by IP, or with the network scan).
-Tip: give each printer a fixed IP (DHCP reservation) in your router. The app also follows a printer by its MAC address if its IP changes.
+首次启动时，应用会**扫描局域网**并添加发现的 Creality 打印机。
+之后可以通过 **+ 打印机** 按 IP 添加，或再次执行网络扫描。
+建议在路由器中为每台打印机设置固定 IP（DHCP 地址保留）。即使 IP 变化，应用也会根据 MAC 地址跟踪打印机。
 
 ### Docker
 
-Host networking is needed so the app can scan the LAN and reach the cameras (Linux hosts):
+Linux 主机需要使用 host 网络模式，应用才能扫描局域网并访问摄像头：
 
 ```bash
 docker compose up -d
 ```
 
-Data (printer list, history, downloaded tools) is stored in `./data`.
+数据（打印机列表、历史记录和下载的工具）保存在 `./data` 中。
 
-## Use it from Claude (MCP)
+## 从 Claude 使用（MCP）
 
-The app serves an MCP server at `http://<computer-ip>:8000/mcp/` (Streamable HTTP). The app must be running.
+应用会在 `http://<电脑IP>:8000/mcp/` 提供 MCP 服务（Streamable HTTP），使用前必须先启动应用。
 
 **Claude Code**
 
@@ -87,8 +84,8 @@ The app serves an MCP server at `http://<computer-ip>:8000/mcp/` (Streamable HTT
 claude mcp add --transport http creality-printers http://127.0.0.1:8000/mcp/
 ```
 
-**Claude Desktop** (needs Node.js). Edit `claude_desktop_config.json`
-(macOS: `~/Library/Application Support/Claude/`, Windows: `%APPDATA%\Claude\`) and restart Claude Desktop:
+**Claude Desktop**（需要 Node.js）。编辑 `claude_desktop_config.json`
+（macOS：`~/Library/Application Support/Claude/`，Windows：`%APPDATA%\Claude\`），然后重启 Claude Desktop：
 
 ```json
 {
@@ -101,10 +98,10 @@ claude mcp add --transport http creality-printers http://127.0.0.1:8000/mcp/
 }
 ```
 
-Replace `127.0.0.1` with the IP of the computer running the app if Claude runs on another machine.
-In that case also allow that name: `PM_MCP_HOSTS=my-pc.local`.
+如果 Claude 运行在另一台电脑上，将 `127.0.0.1` 替换为运行应用的电脑 IP。
+此时还需要允许对应的主机名：`PM_MCP_HOSTS=my-pc.local`。
 
-**stdio** (any MCP client, same machine):
+**stdio**（同一台电脑上的任意 MCP 客户端）：
 
 ```json
 {
@@ -113,108 +110,107 @@ In that case also allow that name: `PM_MCP_HOSTS=my-pc.local`.
 }
 ```
 
-On Windows, use `.venv\\Scripts\\python.exe` as the command.
-Set `PM_URL` if the app is not on `http://127.0.0.1:8000`. The local stdio server authenticates itself with the
-token file `data/.mcp-token` (created automatically on startup, same `PM_DATA_DIR`), so no password is needed.
+Windows 使用 `.venv\\Scripts\\python.exe` 作为命令。
+如果应用不是运行在 `http://127.0.0.1:8000`，请设置 `PM_URL`。本地 stdio 服务会使用
+令牌文件 `data/.mcp-token` 自动完成认证（启动时自动创建，目录与 `PM_DATA_DIR` 相同），因此不需要密码。
 
-### Tools
+### 工具
 
-| Category     | Tools |
+| 类别     | 工具 |
 |--------------|-------|
-| Printers     | `list_printers`, `printer_status`, `discover_printers`, `add_printer` |
-| Camera       | `camera_snapshot` (returns an image Claude can inspect: spaghetti, empty bed…) |
-| Printing     | `start_print`, `pause_print`, `resume_print`, `stop_print`, `clear_error` |
-| Files        | `list_files`, `send_file` (local path or URL; STL/3MF are sliced), `delete_file`, `slicer_profiles` |
-| Control      | `set_temperatures`, `set_fan`, `set_light`, `set_speed`, `move_axis`, `home_axes`, `send_gcode` |
-| Tracking     | `print_history`, `print_stats`, `maintenance`, `mark_maintenance_done` |
-| Power        | `plug_power` |
+| 打印机     | `list_printers`、`printer_status`、`discover_printers`、`add_printer` |
+| 摄像头     | `camera_snapshot`（返回 Claude 可以检查的图片，例如 spaghetti、空热床等） |
+| 打印       | `start_print`、`pause_print`、`resume_print`、`stop_print`、`clear_error` |
+| 文件       | `list_files`、`send_file`（本地路径或 URL；STL/3MF 会被切片）、`delete_file`、`slicer_profiles` |
+| 控制       | `set_temperatures`、`set_fan`、`set_light`、`set_speed`、`move_axis`、`home_axes`、`send_gcode` |
+| 记录       | `print_history`、`print_stats`、`maintenance`、`mark_maintenance_done` |
+| 电源       | `plug_power` |
 
-Example prompts: *"Is anything printing right now?"*, *"Take a picture of the K1 and tell me if the print looks OK"*,
-*"Slice ~/Downloads/benchy.stl in PLA and print it on the Hi if the bed is empty"*.
+示例指令：*“现在有打印机正在打印吗？”*、*“拍一张 K1 的照片，告诉我打印是否正常”*、
+*“将 ~/Downloads/benchy.stl 使用 PLA 切片，如果热床为空就在 Hi 上打印”*。
 
-## Remote access
+## 远程访问
 
-Do **not** open a port on your router: the printers' API has no authentication.
-Use [Tailscale](https://tailscale.com) (or another VPN) on the computer running the app and on your phone,
-then open `http://<computer-name>:8000` from anywhere. Cameras go through the app too.
-You can also protect the app itself with login accounts (see [Accounts and roles](#accounts-and-roles)).
-Scripts and remote MCP clients can authenticate with HTTP Basic using `PM_PASSWORD`:
+请**不要**在路由器上开放端口：打印机 API 没有身份验证。
+请在运行应用的电脑和手机上使用 [Tailscale](https://tailscale.com)（或其他 VPN），
+然后即可从任意位置打开 `http://<电脑名称>:8000`。摄像头画面也会通过应用转发。
+你也可以使用登录账户保护应用本身（参见[账户和角色](#账户和角色)）。
+脚本和远程 MCP 客户端可以使用 `PM_PASSWORD` 通过 HTTP Basic 认证：
 
 ```bash
 PM_PASSWORD='change-me' python run.py
 ```
 
-## Accounts and roles
+## 账户和角色
 
-The web UI has a login page backed by sessions stored in the SQLite database.
+Web 界面提供登录页面，会话存储在 SQLite 数据库中。
 
-- **First run**: opening `/` redirects to `/setup`, where you create the first **admin** account.
-- **管理员 (admin)**: everything — add/edit printers, uploads, controls, slicing, maintenance, smart plugs,
-  G-code console, history deletion, and **Settings → 用户管理** (create users, reset passwords, change roles).
-- **普通用户 (user)**: completely **read-only** and limited to: 监控 (monitoring), 耗材 (consumables),
-  打印任务 (jobs), 温度 (temperature) and 最近打印 (recent prints). Everything else returns `403` from the API
-  and is hidden in the UI.
+- **首次运行**：打开 `/` 会跳转到 `/setup`，在此创建第一个**管理员**账户。
+- **管理员（admin）**：拥有全部权限，包括添加/编辑打印机、上传、控制、切片、维护、智能插座、
+  G-code 控制台、删除历史记录，以及**设置 → 用户管理**（创建用户、重置密码、修改角色）。
+- **普通用户（user）**：完全**只读**，只能访问监控、耗材、打印任务、温度和最近打印。其他 API 请求会返回 `403`，
+  并且对应功能不会显示在界面中。
 
-Manage users in **Settings → 用户管理**. Passwords are stored as salted PBKDF2 hashes; deleting or changing a
-user's password invalidates their sessions immediately.
+在**设置 → 用户管理**中管理用户。密码以加盐 PBKDF2 哈希保存；删除用户或修改密码会立即使其会话失效。
 
-Machines do not use the login page: scripts, `curl` and remote MCP clients authenticate with HTTP Basic
-(`PM_PASSWORD` grants **admin** rights, any other username must match a database account) or with the header
-`X-PM-Token: <data/.mcp-token>`. The web session cookie never works for Basic-style API calls.
+机器接口不使用登录页面：脚本、`curl` 和远程 MCP 客户端通过 HTTP Basic 认证
+（`PM_PASSWORD` 授予**管理员**权限，其他用户名必须匹配数据库账户），或使用请求头
+`X-PM-Token: <data/.mcp-token>`。Web 会话 Cookie 不能用于 Basic 形式的 API 请求。
 
-## Configuration
+## 配置
 
-| Variable              | Default                 | Purpose |
+| 变量              | 默认值                 | 说明 |
 |-----------------------|-------------------------|---------|
-| `PM_PORT`             | `8000`                  | HTTP port |
-| `PM_HOST`             | `0.0.0.0`               | Listen address |
-| `PM_PASSWORD`         | *(none)*                | Machine password (scripts, remote MCP): HTTP Basic auth, **admin** rights |
-| `PM_DATA_DIR`         | OS user data dir¹       | SQLite database, photos, go2rtc, OrcaSlicer |
-| `PM_CONFIG`           | `$PM_DATA_DIR/printers.json` | Printer list |
-| `PM_SCAN_SUBNET`      | auto (`/24` of the default interface) | Subnet to scan, e.g. `192.168.0.0/23` |
-| `PM_MCP_HOSTS`        | *(none)*                | Extra host names/IPs allowed to reach `/mcp/` |
-| `PM_URL`              | `http://127.0.0.1:8000` | App URL used by the stdio MCP server |
-| `ORCA_SLICER`         | auto                    | Path to the OrcaSlicer executable |
-| `GO2RTC`              | auto (downloaded)       | Path to a go2rtc binary |
-| `PM_GO2RTC_API_PORT`  | `19840`                 | go2rtc local API port |
-| `PM_GO2RTC_RTSP_PORT` | `19554`                 | go2rtc local RTSP port |
+| `PM_PORT`             | `8000`                  | HTTP 端口 |
+| `PM_HOST`             | `0.0.0.0`               | 监听地址 |
+| `PM_PASSWORD`         | *(无)*                  | 机器密码（脚本、远程 MCP）：HTTP Basic 认证，拥有**管理员**权限 |
+| `PM_DATA_DIR`         | 操作系统用户数据目录¹ | SQLite 数据库、照片、go2rtc 和切片器数据目录 |
+| `PM_CONFIG`           | `$PM_DATA_DIR/printers.json` | 打印机列表 |
+| `PM_SCAN_SUBNET`      | 自动（默认网卡的 `/24`） | 要扫描的子网，例如 `192.168.0.0/23` |
+| `PM_MCP_HOSTS`        | *(无)*                 | 允许访问 `/mcp/` 的其他主机名/IP |
+| `PM_URL`              | `http://127.0.0.1:8000` | stdio MCP 服务使用的应用地址 |
+| `CREALITY_PRINT`      | 自动                    | Creality Print 可执行文件路径 |
+| `SLICER_BACKEND`      | `creality`              | 仅兼容旧版 OrcaSlicer 时设置为 `orca` |
+| `GO2RTC`              | 自动下载                | go2rtc 可执行文件路径 |
+| `PM_GO2RTC_API_PORT`  | `19840`                 | go2rtc 本地 API 端口 |
+| `PM_GO2RTC_RTSP_PORT` | `19554`                 | go2rtc 本地 RTSP 端口 |
 
 ¹ Linux `~/.local/share/creality-printer-monitor`, macOS `~/Library/Application Support/creality-printer-monitor`,
 Windows `%APPDATA%\creality-printer-monitor`.
 
-## How it works
+## 工作原理
 
-The app speaks the local protocol used by Creality Print / OrcaSlicer:
+应用使用 Creality Print / OrcaSlicer 使用的本地协议：
 
-| Feature              | Printer endpoint |
+| 功能                 | 打印机端点 |
 |----------------------|------------------|
-| Status + commands    | WebSocket `ws://<ip>:9999` |
-| Discovery            | TCP 9999 on every address of the subnet, then `GET http://<ip>/info` (model + MAC) |
-| File upload          | `POST http://<ip>/upload/<name>` |
-| Start a print        | `{"opGcodeFile": "printprt:<gcode dir>/<name>"}` |
-| Camera (Hi / K2)     | WebRTC `http://<ip>:8000/call/webrtc_local`, opened by go2rtc and re-encoded to JPEG by the app |
-| Camera (K1)          | MJPEG `http://<ip>:8080/?action=stream`, relayed by the app |
-| Thumbnails           | `http://<ip>/downloads/humbnail/<name>.png` (sic) |
-| Error messages       | `err.key` / `errcode`, mapped with Creality Print's error table (`creality_errors.json`) |
+| 状态与命令           | WebSocket `ws://<ip>:9999` |
+| 发现打印机           | 扫描子网内每个地址的 TCP 9999，然后请求 `GET http://<ip>/info`（型号和 MAC） |
+| 上传文件             | `POST http://<ip>/upload/<name>` |
+| 开始打印             | `{"opGcodeFile": "printprt:<gcode dir>/<name>"}` |
+| 摄像头（Hi / K2）    | WebRTC `http://<ip>:8000/call/webrtc_local`，由 go2rtc 打开并由应用转码为 JPEG |
+| 摄像头（K1）         | MJPEG `http://<ip>:8080/?action=stream`，由应用转发 |
+| 缩略图               | `http://<ip>/downloads/humbnail/<name>.png`（原接口拼写如此） |
+| 错误信息             | `err.key` / `errcode`，使用 Creality Print 错误表（`creality_errors.json`）映射 |
 
-Code layout (`src/printermonitor/`): `printer.py` (printer connection), `server.py` (web API), `mcp_server.py` (MCP tools),
-`discovery.py` (network scan), `camera.py` + `go2rtc.py` (camera relay), `slicer.py` (OrcaSlicer), `history.py` + `store.py`
-(history, settings, SQLite), `plugs.py` (smart plugs), `errors.py` (error messages). The web UI is the React
-app in `frontend/` (3D viewer and model images in `frontend/public/`); build it once with
-`cd frontend && npm install && npm run build` before starting the server — Docker builds it automatically.
+代码结构（`src/printermonitor/`）：`printer.py`（打印机连接）、`server.py`（Web API）、`mcp_server.py`（MCP 工具）、
+`discovery.py`（网络扫描）、`camera.py` + `go2rtc.py`（摄像头转发）、`slicer.py`（Creality Print）、`history.py` + `store.py`
+（历史记录、设置、SQLite）、`plugs.py`（智能插座）、`errors.py`（错误信息）。Web 界面是 `frontend/` 中的 React
+应用（3D 查看器和模型图片位于 `frontend/public/`）；启动服务前执行一次
+`cd frontend && npm install && npm run build` 构建前端，Docker 会自动完成构建。
 
-### Camera notes
+### 摄像头说明
 
-- A WebRTC camera session that is not closed cleanly can **lock the Creality Hi camera until the printer reboots**.
-  The app therefore opens a single camera connection per printer, only while someone is watching, and closes it properly.
-- If a camera stays unavailable, use **Reset camera** in the printer view; if that's not enough, power-cycle the printer.
+- 未正常关闭的 WebRTC 摄像头会话可能会**锁定 Creality Hi 摄像头，直到打印机重启**。
+  因此应用每台打印机只建立一个摄像头连接，并且只在有人观看时打开，结束观看后正确关闭。
+- 如果摄像头持续不可用，请在打印机页面使用**重置摄像头**；如果仍无效，请断电重启打印机。
 
-## Disclaimer
+## 免责声明
 
-This is an independent project, not affiliated with or endorsed by Creality. It sends real commands to real machines
-(heating, moving, printing): use it at your own risk and never leave a printer unattended.
+这是一个独立项目，与 Creality 没有隶属或授权关系。它会向真实设备发送真实命令
+（加热、移动、打印），请自行承担使用风险，切勿让打印机在无人看管的情况下运行。
 
-## License
+## 许可证
 
-[MIT](LICENSE). Bundles [three.js](https://threejs.org) (MIT). Downloads [go2rtc](https://github.com/AlexxIT/go2rtc) (MIT)
-and optionally [OrcaSlicer](https://github.com/SoftFever/OrcaSlicer) (AGPL-3.0) at runtime; neither is redistributed.
+[MIT](LICENSE)。包含 [three.js](https://threejs.org)（MIT）。运行时下载 [go2rtc](https://github.com/AlexxIT/go2rtc)（MIT），
+并可选使用 [OrcaSlicer](https://github.com/SoftFever/OrcaSlicer)（AGPL-3.0）；这些组件均不随项目重新分发。

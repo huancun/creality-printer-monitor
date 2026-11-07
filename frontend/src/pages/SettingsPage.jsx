@@ -226,7 +226,7 @@ function SlicerCard() {
     return (
       <div>
         <p className="text-xs text-[#d5d8df]">
-          {installState.step === "download" ? `正在下载 OrcaSlicer… ${Math.round(installState.progress || 0)} %` : "正在解压…"}
+          {installState.step === "download" ? `正在下载 Creality Print… ${Math.round(installState.progress || 0)} %` : "正在解压…"}
         </p>
         <div className="mt-2 h-2 rounded-full bg-white/[.07]">
           <div className="h-2 rounded-full bg-lime transition-all" style={{ width: `${Math.min(100, installState.progress || 0)}%` }} />
@@ -240,7 +240,7 @@ function SlicerCard() {
     return (
       <div>
         <p className="flex items-center gap-2 text-xs text-[#d5d8df]">
-          <i className="h-2 w-2 rounded-full bg-lime" /> OrcaSlicer 已安装。
+          <i className="h-2 w-2 rounded-full bg-lime" /> Creality Print 已安装。
         </p>
         <p className="mt-2 text-[10px] text-muted">
           {catalog.machine
@@ -257,9 +257,8 @@ function SlicerCard() {
   if (status.can_install === false) {
     return (
       <p className="text-xs leading-relaxed text-muted">
-        如需在应用中直接切片 .stl / .3mf 文件，请从{" "}
-        <a href="https://orcaslicer.com" target="_blank" rel="noreferrer" className="text-lime underline">orcaslicer.com</a>{" "}
-        安装 OrcaSlicer（或将环境变量 <code className="rounded bg-ink px-1">ORCA_SLICER</code> 指向其可执行文件），然后重启应用。
+        如需在应用中直接切片 .stl / .3mf 文件，请安装 Creality Print 7.3 或更高版本（官方支持 K3），并将环境变量{" "}
+        <code className="rounded bg-ink px-1">CREALITY_PRINT</code> 指向其可执行文件，然后重启应用。
       </p>
     );
   }
@@ -267,13 +266,13 @@ function SlicerCard() {
   return (
     <div>
       <p className="text-xs leading-relaxed text-muted">
-        如需在应用中直接切片 .stl / .3mf 文件，请安装 OrcaSlicer v2.4.2（官方版本，下载约 150 MB，安装后约 380 MB，已校验哈希值）。其中包含 Creality（Hi、K1、K2 等）配置文件。
+        如需在应用中直接切片 .stl / .3mf 文件，请安装 Creality Print 7.3 或更高版本，并将其可执行文件路径设置到 <code className="rounded bg-ink px-1">CREALITY_PRINT</code>。K3 的多喷嘴和混色配置由 Creality Print 提供。
       </p>
       {installState.step === "error" && (
         <p className="mt-2 rounded-lg border border-red-400/30 bg-red-400/[.07] px-3 py-2 text-[11px] text-red-300">{installState.error}</p>
       )}
       <button onClick={install} disabled={busy} className={`${primaryBtn} mt-3 disabled:opacity-50`}>
-        {busy ? "正在启动安装…" : "安装 OrcaSlicer"}
+        {busy ? "正在检查…" : "查看安装说明"}
       </button>
     </div>
   );
