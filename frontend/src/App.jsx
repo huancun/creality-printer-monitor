@@ -71,6 +71,10 @@ function Icon({ children, className = "" }) {
 }
 
 function Sidebar({ active, onNavigate, printerCount, onlineCount, isAdmin }) {
+  const navButtonClass = (label) => `flex w-full items-center rounded-xl px-3 py-2.5 text-left text-[13px] transition ${
+    active === label ? "bg-[#1c222b] text-white" : "text-[#9298a5] hover:bg-white/[.04] hover:text-white"
+  }`;
+
   return (
     <aside className="fixed inset-y-0 left-0 z-20 hidden w-[228px] flex-col border-r border-line bg-[#0c0e13]/90 px-4 py-6 lg:flex">
       <a href="#" className="mb-12 flex items-center gap-3 px-2">
@@ -86,9 +90,7 @@ function Sidebar({ active, onNavigate, printerCount, onlineCount, isAdmin }) {
           <button
             key={item.label}
             onClick={() => onNavigate(item.label)}
-            className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] transition ${
-              active === item.label ? "bg-[#1c222b] text-white" : "text-[#9298a5] hover:bg-white/[.04] hover:text-white"
-            }`}
+            className={navButtonClass(item.label)}
           >
             <span className="flex-1">{item.label}</span>
             {item.count && <span className="text-[10px] text-[#777d8a]">{String(printerCount).padStart(2, "0")}</span>}
@@ -96,7 +98,7 @@ function Sidebar({ active, onNavigate, printerCount, onlineCount, isAdmin }) {
         ))}
       </nav>
       <div className="mb-3 mt-10 px-3 text-[10px] font-semibold uppercase tracking-[.18em] text-[#666c79]">管理</div>
-      {isAdmin && <button onClick={() => onNavigate("设置")} className="flex items-center rounded-xl px-3 py-2.5 text-left text-[13px] text-[#9298a5] transition hover:bg-white/[.04] hover:text-white">
+      {isAdmin && <button onClick={() => onNavigate("设置")} className={navButtonClass("设置")}>
         设置
       </button>}
       <div className="mt-auto rounded-2xl border border-line bg-[#11141a] p-4">
@@ -536,7 +538,7 @@ function App() {
           <div className="h-full w-[260px] border-r border-line bg-[#0c0e13] p-5" onClick={(event) => event.stopPropagation()}>
             <div className="mb-8 flex items-center justify-between"><span className="text-sm font-semibold">CREALITY MONITOR</span><button onClick={() => setMobileMenu(false)} aria-label="关闭菜单">✕</button></div>
             {navItems.map((item) => <button key={item.label} onClick={() => navigate(item.label)} className={`flex w-full gap-3 rounded-xl px-3 py-3 text-left text-sm ${active === item.label ? "bg-[#1c222b] text-lime" : "text-muted"}`}><Icon>{item.icon}</Icon>{item.label}</button>)}
-            {isAdmin && <button onClick={() => navigate("设置")} className={`flex w-full gap-3 rounded-xl px-3 py-3 text-left text-sm ${active === "设置" ? "bg-[#1c222b] text-lime" : "text-muted"}`}>设置</button>}
+            {isAdmin && <button onClick={() => navigate("设置")} className={`flex w-full gap-3 rounded-xl px-3 py-3 text-left text-sm ${active === "设置" ? "bg-[#1c222b] text-lime" : "text-muted"}`}><Icon />设置</button>}
           </div>
         </div>}
 

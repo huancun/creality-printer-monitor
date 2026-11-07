@@ -37,6 +37,21 @@ function HistoryRow({ row, isAdmin, onDelete, showPrinter }) {
           {formatDate(row.started_at)}
           {row.duration_s ? ` · ${formatDuration(row.duration_s)}` : ""}
         </div>
+        {row.filament_breakdown?.length > 0 && (
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-[#9ba1ad]" title="完工用量按各耗材的切片预估占比分摊">
+            {row.filament_breakdown.map((filament, index) => {
+              const label = filament.profile || filament.type || `耗材 ${index + 1}`;
+              const grams = row.status === "running" ? filament.estimated_g : filament.grams;
+              return (
+                <span key={`${label}-${index}`} className="inline-flex min-w-0 items-center gap-1">
+                  {/^#[0-9a-f]{6}$/i.test(filament.color || "") && <i className="h-2 w-2 shrink-0 rounded-full border border-white/20" style={{ backgroundColor: filament.color }} />}
+                  <span className="max-w-[150px] truncate">{label}</span>
+                  <span className="shrink-0">{formatGrams(grams)}</span>
+                </span>
+              );
+            })}
+          </div>
+        )}
         {row.error_title && <div className="mt-1 truncate text-[10px] text-red-300">{row.error_title}</div>}
       </div>
       <div className="flex shrink-0 items-center gap-3">
@@ -220,7 +235,7 @@ export default function HistoryPage({ printers, isAdmin, notify }) {
         <div>
           <div className="flex items-center gap-2 text-[10px] uppercase tracking-[.2em] text-lime"><span className="h-px w-5 bg-lime" />Print history</div>
           <h1 className="mt-3 text-[26px] font-semibold tracking-[-.04em] text-white sm:text-[30px]">打印历史</h1>
-          <p className="mt-2 text-xs text-[#888e9c]">时长、耗材与费用由应用自动统计。</p>
+          <p className="mt-2 text-xs text-[#888e9c]">多种耗材的完工用量按切片预估占比分摊；配置名可在设置中单独定价。</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <select

@@ -34,17 +34,53 @@ def parse_gcode_meta(text: str) -> dict[str, Any]:
     """Slicer info from Creality Print comments."""
     meta: dict[str, Any] = {}
 
-    def find(pattern: str) -> str | None:
-        m = re.search(pattern, text, re.MULTILINE | re.IGNORECASE)
-        return m.group(1).strip() if m else None
+    values: dict[str, str] = {}
+    for line in text.splitlines():
+        match = re.match(r"^;\s*([^=]+?)\s*[=:]\s*(.*?)\s*$", line)
+        if match:
+            values[match.group(1).strip().lower()] = match.group(2).strip()
 
-    if g := find(r"^;\s*(?:total )?filament used \[g\]\s*[=:]\s*([\d.]+)"):
-        meta["filament_g"] = float(g)
-    if t := find(r"^;\s*filament_type\s*[=:]\s*([^\n;]+)"):
-        meta["material"] = t.split(";")[0].strip()
-    if c := find(r"^;\s*filament_colou?r\s*[=:]\s*([^\n]+)"):
-        meta["color"] = c.split(";")[0].strip()
-    if t := find(r"^;\s*estimated printing time(?: \(normal mode\))?\s*[=:]\s*([^\n]+)"):
+    def split_list(key: str, separator: str = ";") -> list[str]:
+        raw = values.get(key, "")
+        return [part.strip().strip('"') for part in raw.split(separator)] if raw else []
+
+    def parse_numbers(raw: str | None) -> list[float]:
+        if not raw:
+            return []
+        out = []
+        for item in raw.split(","):
+            try:
+                out.append(float(item.strip()))
+            except ValueError:
+                return []
+        return out
+
+    usage = parse_numbers(values.get("filament used [g]"))
+    names = split_list("filament_settings_id")
+    types = split_list("filament_type")
+    colors = split_list("filament_colour") or split_list("filament_color")
+    filaments = []
+    for index, grams in enumerate(usage):
+        filaments.append({
+            "profile": names[index] if index < len(names) else "",
+            "type": types[index] if index < len(types) else "",
+            "color": colors[index] if index < len(colors) else "",
+            "estimated_g": grams,
+        })
+    if filaments:
+        meta["filaments"] = filaments
+
+    total = parse_numbers(values.get("total filament used [g]"))
+    if total:
+        meta["filament_g"] = total[0]
+    elif usage:
+        meta["filament_g"] = sum(usage)
+
+    if types:
+        meta["material"] = types[0]
+    if colors:
+        meta["color"] = colors[0]
+    if t := values.get("estimated printing time (normal mode)") or values.get("estimated printing time"):
         meta["est_time_s"] = parse_duration(t)
     return meta
 
@@ -70,6 +106,45 @@ def material_family(material: str | None, known: dict[str, Any], default: str) -
         if key.upper() in up:
             return key
     return default
+
+
+def filament_price_key(filament: dict[str, Any], known: dict[str, Any], default: str) -> str:
+    """Match the filament name without slicer's printer/nozzle suffix."""
+    def normalize(value: Any) -> str:
+        return " ".join(str(value or "").split("@", 1)[0].split()).casefold()
+
+    profile = normalize(filament.get("profile"))
+    for key in known:
+        if normalize(key) == profile and profile:
+            return key
+    material = filament.get("type")
+    return material_family(material, known, default) if material else default
+
+
+def allocate_filament_usage(
+    filaments: list[dict[str, Any]], actual_total_g: float | None, settings: dict[str, Any]
+) -> list[dict[str, Any]]:
+    estimates = [max(0.0, float(item.get("estimated_g") or 0)) for item in filaments]
+    estimate_total = sum(estimates)
+    known = settings["filaments"]
+    out = []
+    for item, estimated_g in zip(filaments, estimates):
+        price_key = filament_price_key(item, known, settings["default_filament"])
+        price_kg = float(known.get(price_key, {}).get("price_kg", 0))
+        grams = (
+            actual_total_g * estimated_g / estimate_total
+            if actual_total_g is not None and estimate_total
+            else estimated_g if actual_total_g is None else 0.0
+        )
+        out.append({
+            **item,
+            "estimated_g": round(estimated_g, 2),
+            "grams": round(grams, 2) if grams is not None else None,
+            "price_key": price_key,
+            "price_kg": price_kg,
+            "cost": round(grams * price_kg / 1000, 3) if grams is not None else None,
+        })
+    return out
 
 
 class Tracker:
@@ -217,11 +292,16 @@ class Tracker:
             grams = grams_from_length(last["usedMaterialLength"], density)
         elif rec.get("est_filament_g"):
             grams = rec["est_filament_g"] * progress / 100
+        breakdown = rec.get("filament_breakdown")
+        if breakdown:
+            breakdown = allocate_filament_usage(breakdown, grams, settings)
         fields: dict[str, Any] = {
             "status": status, "ended_at": now, "duration_s": duration, "progress": progress,
             "filament_g": round(grams, 2) if grams else None,
         }
-        fields.update(self._costs(fields, family, settings))
+        if breakdown:
+            fields["filament_breakdown"] = breakdown
+        fields.update(self._costs(fields, family, settings, breakdown))
         if status != "completed" and (err := last.get("error")):
             fields["error_code"], fields["error_title"] = err["code"], err["title"]
         self.store.update_print(rec_id, **fields)
@@ -236,11 +316,18 @@ class Tracker:
         self.on_finish(p, {**rec, **fields})
 
     @staticmethod
-    def _costs(fields: dict[str, Any], family: str, settings: dict[str, Any]) -> dict[str, Any]:
-        price = settings["filaments"].get(family, {}).get("price_kg", 0)
+    def _costs(
+        fields: dict[str, Any], family: str, settings: dict[str, Any],
+        breakdown: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         energy = settings["energy"]
+        filament_cost = (
+            sum(float(item.get("cost") or 0) for item in breakdown)
+            if breakdown
+            else (fields.get("filament_g") or 0) * settings["filaments"].get(family, {}).get("price_kg", 0) / 1000
+        )
         return {
-            "cost_filament": round((fields.get("filament_g") or 0) * price / 1000, 3),
+            "cost_filament": round(filament_cost, 3),
             "cost_energy": round(fields["duration_s"] / 3600 * energy["power_w"] / 1000 * energy["price_kwh"], 3),
         }
 
@@ -251,7 +338,11 @@ class Tracker:
             if rec["status"] == "running" or rec["duration_s"] is None:
                 continue
             family = material_family(rec.get("material"), settings["filaments"], settings["default_filament"])
-            self.store.update_print(rec["id"], **self._costs(rec, family, settings))
+            breakdown = rec.get("filament_breakdown")
+            if breakdown:
+                breakdown = allocate_filament_usage(breakdown, rec.get("filament_g"), settings)
+                self.store.update_print(rec["id"], filament_breakdown=breakdown)
+            self.store.update_print(rec["id"], **self._costs(rec, family, settings, breakdown))
 
     # ---------- enrichment (network) ----------
     @staticmethod
@@ -273,6 +364,8 @@ class Tracker:
                 meta = parse_gcode_meta(text)
                 if meta.get("filament_g"):
                     fields["est_filament_g"] = meta["filament_g"]
+                if meta.get("filaments"):
+                    fields["filament_breakdown"] = meta["filaments"]
                 if meta.get("est_time_s"):
                     fields["est_time_s"] = meta["est_time_s"]
                 rec = self.store.get_print(rec_id) or {}
@@ -288,6 +381,14 @@ class Tracker:
         except Exception as e:
             log.warning("%s: info for file %s unavailable: %s", p.name, file, e)
         self.store.update_print(rec_id, **fields)
+        if fields.get("filament_breakdown"):
+            rec = self.store.get_print(rec_id) or {}
+            if rec.get("status") != "running":
+                settings = self.store.settings()
+                breakdown = allocate_filament_usage(fields["filament_breakdown"], rec.get("filament_g"), settings)
+                family = material_family(rec.get("material"), settings["filaments"], settings["default_filament"])
+                costs = self._costs({**rec, **fields}, family, settings, breakdown)
+                self.store.update_print(rec_id, filament_breakdown=breakdown, **costs)
 
     @staticmethod
     async def _gcode_ends(c: httpx.AsyncClient, p: Printer, file: str) -> str:

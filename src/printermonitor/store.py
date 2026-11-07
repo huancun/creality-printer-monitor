@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS prints (
     filament_g REAL,
     material TEXT,
     color TEXT,
+    filament_breakdown TEXT,
     cost_filament REAL,
     cost_energy REAL,
     error_code INTEGER,
@@ -118,6 +119,9 @@ class Store:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys = ON")
         self.db.executescript(SCHEMA)
+        columns = {row["name"] for row in self.db.execute("PRAGMA table_info(prints)")}
+        if "filament_breakdown" not in columns:
+            self.db.execute("ALTER TABLE prints ADD COLUMN filament_breakdown TEXT")
         self.db.commit()
 
     # ---------- settings ----------
@@ -149,13 +153,24 @@ class Store:
     def update_print(self, pid: int, **fields: Any) -> None:
         if not fields:
             return
+        if "filament_breakdown" in fields and fields["filament_breakdown"] is not None:
+            fields["filament_breakdown"] = json.dumps(fields["filament_breakdown"], ensure_ascii=False)
         sets = ", ".join(f"{k} = ?" for k in fields)
         self.db.execute(f"UPDATE prints SET {sets} WHERE id = ?", (*fields.values(), pid))
         self.db.commit()
 
     def get_print(self, pid: int) -> dict[str, Any] | None:
         row = self.db.execute("SELECT * FROM prints WHERE id = ?", (pid,)).fetchone()
-        return dict(row) if row else None
+        return self._print_dict(row) if row else None
+
+    @staticmethod
+    def _print_dict(row: sqlite3.Row) -> dict[str, Any]:
+        record = dict(row)
+        try:
+            record["filament_breakdown"] = json.loads(record["filament_breakdown"] or "null")
+        except (TypeError, ValueError):
+            record["filament_breakdown"] = None
+        return record
 
     def running_print(self, printer_id: str) -> dict[str, Any] | None:
         row = self.db.execute(
@@ -170,7 +185,7 @@ class Store:
             args.append(printer_id)
         q += " ORDER BY started_at DESC LIMIT ? OFFSET ?"
         args += [limit, offset]
-        return [dict(r) for r in self.db.execute(q, args)]
+        return [self._print_dict(r) for r in self.db.execute(q, args)]
 
     def delete_print(self, pid: int) -> None:
         row = self.get_print(pid)

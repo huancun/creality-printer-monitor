@@ -15,7 +15,7 @@ const buildForm = (raw) => ({
 
 function Card({ title, hint, children, className = "" }) {
   return (
-    <section className={`rounded-2xl border border-line bg-panel p-4 sm:p-5 ${className}`}>
+    <section className={`min-w-0 rounded-2xl border border-line bg-panel p-4 sm:p-5 ${className}`}>
       <h3 className="text-[13px] font-semibold text-white">{title}</h3>
       {hint && <p className="mt-1.5 text-[10px] leading-relaxed text-muted">{hint}</p>}
       <div className="mt-4">{children}</div>
@@ -275,7 +275,7 @@ export default function SettingsPage({ printers, user, notify }) {
   const filamentKeys = filaments.map((row) => String(row.type || "").trim().toUpperCase()).filter(Boolean);
 
   return (
-    <div>
+    <div className="min-w-0">
       <section className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div>
           <div className="flex items-center gap-2 text-[10px] uppercase tracking-[.2em] text-lime"><span className="h-px w-5 bg-lime" />Configuration</div>
@@ -299,9 +299,9 @@ export default function SettingsPage({ printers, user, notify }) {
       {!form && !loadError && <p className="mt-6 text-xs text-muted">正在加载设置…</p>}
 
       {form && (
-        <div className="mt-6 grid gap-4 xl:grid-cols-2">
+        <div className="mt-6 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 xl:grid-cols-2">
           {/* filament prices */}
-          <Card title="耗材价格" hint="用于计算每次打印的费用。密度用于将耗材长度换算为重量。">
+          <Card title="耗材价格" hint="可按材料类型设置默认价，也可用耗材名（如“徕思 PLA”）单独定价；G-code 配置名中 @ 后的打印机配置后缀会忽略。密度用于将耗材长度换算为重量。">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-[11px]">
                 <thead>
@@ -319,7 +319,7 @@ export default function SettingsPage({ printers, user, notify }) {
                         <input
                           value={row.type}
                           aria-label="类型"
-                          placeholder="例如：PLA-SILK"
+                          placeholder="材料类型或耗材名（忽略 @ 后缀）"
                           onChange={(event) => update((f) => { f.filaments[index].type = event.target.value; })}
                           className={inputCls}
                         />
@@ -473,7 +473,7 @@ export default function SettingsPage({ printers, user, notify }) {
                 return (
                   <div key={printer.id} className="rounded-xl border border-line bg-ink p-3">
                     <b className="mb-2 block truncate text-xs font-medium text-white">{printer.name}</b>
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
                       <select
                         value={plug.type || ""}
                         aria-label={`${printer.name} 插座类型`}
@@ -484,7 +484,7 @@ export default function SettingsPage({ printers, user, notify }) {
                             f.plugs[printer.id] = current;
                           })
                           }
-                        className={`${inputCls} py-1.5`}
+                        className={`${inputCls} max-w-full py-1.5`}
                       >
                         <option value="">不使用插座</option>
                         {Object.entries(plugTypes).map(([key, label]) => (
@@ -502,7 +502,7 @@ export default function SettingsPage({ printers, user, notify }) {
                             f.plugs[printer.id] = current;
                           })
                           }
-                        className={`${inputCls} py-1.5 disabled:opacity-40`}
+                        className={`${inputCls} min-w-0 max-w-full disabled:opacity-40`}
                       />
                     </div>
                     {plug.type && (
