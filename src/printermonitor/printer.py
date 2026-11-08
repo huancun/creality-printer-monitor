@@ -180,7 +180,15 @@ class Printer:
                     pass
 
     def job_state(self) -> str:
-        """Prefer fresh Moonraker job state over stale Creality print fields."""
+        """Merge Moonraker and Creality state without hiding an active print.
+
+        Moonraker can briefly report ``standby`` while the Creality telemetry
+        already contains the active file and a printing state (notably just
+        after a remote start).  In that conflict, the active Creality state is
+        the stronger signal; otherwise a fresh Moonraker state clears stale
+        Creality print fields as before.
+        """
+        telemetry_state = derive_state(self.data, self.online)
         if self._moonraker_state and time.monotonic() - self._moonraker_state_at <= MOONRAKER_STATE_TTL:
             mapped = {
                 "standby": "stopped",
@@ -193,8 +201,10 @@ class Printer:
                 "startup": "processing",
             }.get(self._moonraker_state)
             if mapped:
+                if mapped in ("idle", "stopped") and telemetry_state in ("printing", "processing", "paused", "self_test"):
+                    return telemetry_state
                 return mapped
-        return derive_state(self.data, self.online)
+        return telemetry_state
 
     def snapshot(self) -> dict[str, Any]:
         return {

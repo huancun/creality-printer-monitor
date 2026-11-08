@@ -925,7 +925,11 @@ async def api_send(
     except ValueError as e:
         raise HTTPException(400, str(e))
     if start:
-        busy = [p.name for p in targets if derive_state(p.data, p.online) in plugs.BUSY or not p.online]
+        # Use the same state source exposed to the UI.  job_state() prefers a
+        # fresh Moonraker state and only falls back to the printer telemetry;
+        # checking p.data directly can reject an actually stopped printer
+        # while its older Creality fields still say "processing".
+        busy = [p.name for p in targets if p.job_state() in plugs.BUSY or not p.online]
         if busy:
             raise HTTPException(409, f"以下打印机当前不可用：{', '.join(busy)}")
     workdir = Path(tempfile.mkdtemp(prefix="pm-send-"))
@@ -959,12 +963,13 @@ async def _send_one(job_id: str, p: Printer, src: Path, name: str, start: bool, 
             t["step"] = "starting"
             set_job(job_id)
             await asyncio.sleep(1)  # let the printer index the file
-            if not p.files:
-                try:
-                    await p.list_files()  # to find the exact G-code folder
-                except Exception:
-                    pass
-                await (p.multi_color_print(name) if mapping else p.print_file(name))
+            try:
+                # Refresh after upload so gcode_dir() reflects the printer's
+                # actual storage root, even when an older file cache exists.
+                await p.list_files()
+            except Exception:
+                log.warning("could not refresh file list before starting %s on %s", name, p.name, exc_info=True)
+            await (p.multi_color_print(name) if mapping else p.print_file(name))
         t["step"] = "done"
     except Exception as e:
         log.exception("upload %s -> %s", name, p.name)
