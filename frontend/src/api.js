@@ -34,6 +34,9 @@ export function normalizeColor(value) {
   // Creality firmware sometimes prefixes its 6-digit color with a zero
   // (for example #0ffffff).
   if (/^0[0-9a-f]{6}$/i.test(hex)) return `#${hex.slice(1)}`;
+  // Creality slicer metadata uses ARGB (#AARRGGBB), while CSS uses RGBA
+  // (#RRGGBBAA). Convert it so the alpha channel is preserved in previews.
+  if (/^[0-9a-f]{8}$/i.test(hex)) return `#${hex.slice(2)}${hex.slice(0, 2)}`;
   if (/^[0-9a-f]{6}$/i.test(hex)) return `#${hex}`;
   if (/^[0-9a-f]{3}$/i.test(hex)) {
     return `#${hex.split("").map((digit) => digit + digit).join("")}`;
@@ -67,6 +70,15 @@ export function printerView(printer) {
     : printer.state === "idle" || printer.state === "completed"
       ? "ready"
       : printer.state;
+
+  const colorValues = list("filament_colour").length ? list("filament_colour") : list("filament_color");
+  const profiles = list("filament_settings_id");
+  const types = list("filament_type");
+  const tools = [...text.matchAll(/^\s*T(\d+)\s*$/gim)].map((match) => `T${match[1]}`);
+  const toolIds = [...new Set(tools)];
+  const filamentIds = colorValues.length
+    ? colorValues.map((_, index) => `T1${String.fromCharCode(65 + index)}`)
+    : toolIds;
 
   return {
     id: printer.id,
@@ -214,8 +226,13 @@ export function parseGcodeMeta(text) {
     filament_g: g ? Number(g) : null,
     est_time_s: secs || null,
     material: find(/^;\s*filament_type\s*[=:]\s*([^\n;]+)/mi),
-    filaments: (list("filament_colour").length ? list("filament_colour") : list("filament_color"))
-      .map((color, index) => ({ id: `T1${String.fromCharCode(65 + index)}`, color })),
+    filaments: filamentIds.map((id, index) => ({
+      id,
+      profile: profiles[index] || null,
+      type: types[index] || null,
+      color: colorValues[index] || null,
+    })),
+    hasColorMetadata: colorValues.length > 0,
   };
 }
 

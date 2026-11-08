@@ -243,7 +243,11 @@ function SendCard({ printers, notify }) {
           <div className="mt-4 rounded-xl border border-line bg-panel/60 p-3">
             <div className="mb-2">
               <h3 className="text-xs font-semibold text-white">耗材颜色映射</h3>
-              <p className="mt-1 text-[10px] text-muted">把切片配置映射到 {selectedPrinter?.name || "打印机"} 的 CFS 槽位；发送并开始打印时会同步到机器。</p>
+              <p className="mt-1 text-[10px] text-muted">
+                {meta.hasColorMetadata
+                  ? `把切片配置映射到 ${selectedPrinter?.name || "打印机"} 的 CFS 槽位；发送并开始打印时会同步到机器。`
+                  : "这个 G-code 没有保存颜色信息，只能识别工具编号，无法预览切片颜色。请在切片软件中设置颜色后重新切片。"}
+              </p>
             </div>
             <div className="space-y-2">
               {meta.filaments.map((source, index) => {
@@ -252,9 +256,13 @@ function SendCard({ printers, notify }) {
                 return (
                   <label key={`${source.id}-${index}`} className="flex items-center gap-2 text-[10px] text-[#c8ccd4]">
                     <i className="h-2.5 w-2.5 shrink-0 rounded-full border border-white/30" style={{ backgroundColor: normalizeColor(source.color) || "#888" }} />
-                    <span className="w-16 shrink-0 truncate">{source.id}</span>
+                    <span className="min-w-0 w-40 shrink-0 truncate" title={`${source.id} · ${source.color || "未知颜色"}`}>
+                      {source.profile || source.id}
+                      <small className="ml-1 text-[9px] text-muted">{source.id} · {source.color || "未知颜色"}</small>
+                    </span>
                     <select
                       value={value}
+                      disabled={!meta.hasColorMetadata}
                       onChange={(event) => {
                         const slot = machineFilaments.find((item) => `${item.box}:${item.id}` === event.target.value);
                         setColorMapping((current) => {
