@@ -268,7 +268,7 @@ function SendCard({ printers, notify }) {
                       <option value="">不映射（由机器自动匹配）</option>
                       {machineFilaments.map((slot) => (
                         <option key={`${slot.box}:${slot.id}`} value={`${slot.box}:${slot.id}`}>
-                          CFS {slot.box}·{Number(slot.id) + 1} · {slot.name || slot.type || "耗材"}
+                          CFS {slot.box}·{Number(slot.id) + 1} · {slot.name || slot.type || "耗材"} · {normalizeColor(slot.color) || "未知颜色"}
                         </option>
                       ))}
                     </select>

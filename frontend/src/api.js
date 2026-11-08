@@ -28,7 +28,7 @@ export async function api(path, options = {}) {
 // Normalize printer/slicer color metadata before it reaches a CSS style.
 // Different firmware and slicer versions use #RRGGBB, RRGGBB, #RGB, or names.
 export function normalizeColor(value) {
-  const raw = String(value ?? "").trim();
+  const raw = String(value ?? "").trim().replace(/^[\"']|[\"']$/g, "");
   if (!raw) return null;
   const hex = raw.replace(/^#|^0x/i, "");
   // Creality firmware sometimes prefixes its 6-digit color with a zero
@@ -204,7 +204,7 @@ export function parseGcodeMeta(text) {
   const t = find(/^;\s*estimated printing time(?: \(normal mode\))?\s*[=:]\s*([^\n]+)/mi);
   const list = (key) => {
     const match = text.match(new RegExp(`^;\\s*${key}\\s*[=:]\\s*([^\\n]+)`, "mi"));
-    return match ? match[1].split(";").map((item) => item.trim()).filter(Boolean) : [];
+    return match ? match[1].split(/[;,]/).map((item) => item.trim().replace(/^[\"']|[\"']$/g, "")).filter(Boolean) : [];
   };
   let secs = 0;
   for (const [, value, unit] of (t || "").matchAll(/(\d+)\s*([dhms])/g)) {
