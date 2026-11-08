@@ -81,6 +81,25 @@ function HistoryRow({ row, isAdmin, onDelete, onView, showPrinter }) {
   );
 }
 
+function reconcileRunningRow(row, printers) {
+  if (row.status !== "running") return row;
+  const printer = printers.find((item) => item.id === row.printer_id);
+  // If the printer is offline, its last reported idle state may predate this
+  // print, so keep the stored status until a fresh online snapshot arrives.
+  if (!printer?.online) return row;
+
+  const raw = printer.raw || {};
+  const currentFile = String(raw.data?.printFileName || "").split("/").pop().toLowerCase();
+  const rowFile = String(row.file || "").split("/").pop().toLowerCase();
+  const sameJob = currentFile && currentFile === rowFile;
+  if (sameJob && raw.state === "completed") return { ...row, status: "completed", progress: 100 };
+  if (sameJob && ["printing", "processing", "paused", "self_test"].includes(printer.state)) return row;
+
+  // The live printer is online and reports idle/stopped, or it has moved on
+  // to another file. The history row's running flag is stale.
+  return { ...row, status: "stopped" };
+}
+
 function MetricChart({ rows, metric }) {
   const months = useMemo(() => {
     const now = new Date();
@@ -174,12 +193,15 @@ export default function HistoryPage({ printers, isAdmin, notify }) {
 
   useEffect(() => {
     load();
+    const refreshTimer = window.setInterval(load, 15000);
+    return () => window.clearInterval(refreshTimer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const reconciledRows = useMemo(() => (rows || []).map((row) => reconcileRunningRow(row, printers)), [rows, printers]);
   const filtered = useMemo(
-    () => (rows || []).filter((row) => (!printerId || row.printer_id === printerId) && (!status || row.status === status)),
-    [rows, printerId, status],
+    () => reconciledRows.filter((row) => (!printerId || row.printer_id === printerId) && (!status || row.status === status)),
+    [reconciledRows, printerId, status],
   );
   const done = useMemo(() => filtered.filter((row) => row.status !== "running"), [filtered]);
   const okCount = done.filter((row) => row.status === "completed").length;

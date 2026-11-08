@@ -37,6 +37,8 @@ POLL_SECS = 5.0
 BOX_POLL_SECS = 60.0  # filament (boxsInfo): never pushed spontaneously by the printer
 TEMP_SAMPLE_SECS = 5.0
 TEMP_HISTORY = 360  # 30 min at 5 s
+MOONRAKER_POLL_SECS = 5.0
+MOONRAKER_STATE_TTL = 20.0
 # Bulky responses we don't keep in the state broadcast to browsers.
 DROP_KEYS = {"retMaterials", "historyList", "elapseVideoList"}
 
@@ -106,6 +108,10 @@ def derive_state(d: dict[str, Any], online: bool) -> str:
     except (TypeError, ValueError):
         progress = -1
     state = d.get("state")
+    try:
+        state = int(state)
+    except (TypeError, ValueError):
+        pass
     job = "idle"
     if d.get("printFileName"):
         if progress >= 100 or state == 2:
@@ -152,6 +158,9 @@ class Printer:
         self._ws: websockets.ClientConnection | None = None
         self._send_lock = asyncio.Lock()
         self._task: asyncio.Task | None = None
+        self._moonraker_task: asyncio.Task | None = None
+        self._moonraker_state: str | None = None
+        self._moonraker_state_at = 0.0
         self._on_update = on_update
         self.temps: deque[tuple[float | None, ...]] = deque(maxlen=TEMP_HISTORY)
         self._last_sample = 0.0
@@ -159,14 +168,33 @@ class Printer:
     # ---------- lifecycle ----------
     def start(self) -> None:
         self._task = asyncio.create_task(self._run(), name=f"printer-{self.id}")
+        self._moonraker_task = asyncio.create_task(self._poll_moonraker(), name=f"moonraker-{self.id}")
 
     async def stop(self) -> None:
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
+        for task in (self._task, self._moonraker_task):
+            if task:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+    def job_state(self) -> str:
+        """Prefer fresh Moonraker job state over stale Creality print fields."""
+        if self._moonraker_state and time.monotonic() - self._moonraker_state_at <= MOONRAKER_STATE_TTL:
+            mapped = {
+                "standby": "stopped",
+                "ready": "idle",
+                "printing": "printing",
+                "paused": "paused",
+                "complete": "completed",
+                "cancelled": "stopped",
+                "error": "error",
+                "startup": "processing",
+            }.get(self._moonraker_state)
+            if mapped:
+                return mapped
+        return derive_state(self.data, self.online)
 
     def snapshot(self) -> dict[str, Any]:
         return {
@@ -178,7 +206,7 @@ class Printer:
             "mac": self.mac,
             "online": self.online,
             "camera": self.camera_mode(),
-            "state": derive_state(self.data, self.online),
+            "state": self.job_state(),
             "error": self.active_error(),
             "data": self.data,
         }
@@ -215,6 +243,27 @@ class Printer:
                 self._on_update(self)
             await asyncio.sleep(backoff)
             backoff = min(backoff * 1.8, 30.0)
+
+    async def _poll_moonraker(self) -> None:
+        """Use Klipper's job status to clear stale print state from Creality telemetry."""
+        async with httpx.AsyncClient(timeout=3) as client:
+            while True:
+                try:
+                    url = f"http://{self.host}:{MOONRAKER_PORT}/printer/objects/query?print_stats"
+                    response = await client.get(url)
+                    response.raise_for_status()
+                    payload = response.json()
+                    state = payload["result"]["status"]["print_stats"]["state"]
+                    if isinstance(state, str):
+                        state = state.lower()
+                        changed = state != self._moonraker_state
+                        self._moonraker_state = state
+                        self._moonraker_state_at = time.monotonic()
+                        if changed:
+                            self._on_update(self)
+                except (httpx.HTTPError, KeyError, TypeError, ValueError):
+                    pass  # Some models or networks do not expose Moonraker.
+                await asyncio.sleep(MOONRAKER_POLL_SECS)
 
     async def _poll(self) -> None:
         """Like the printer's web UI: periodically request the full state again."""
@@ -273,7 +322,7 @@ class Printer:
         after resuming: while a print is running normally, we don't show it."""
         if not self.online:
             return None
-        state = derive_state(self.data, True)
+        state = self.job_state()
         return relevant_error(self.data, "idle" if state == "error" else state)
 
     def set_host(self, host: str) -> None:
@@ -281,10 +330,12 @@ class Printer:
         if host == self.host:
             return
         self.host = host
+        self._moonraker_state = None
+        self._moonraker_state_at = 0.0
         if self._task:
             self._task.cancel()
         self.online = False
-        self.start()
+        self._task = asyncio.create_task(self._run(), name=f"printer-{self.id}")
 
     def _sample_temps(self) -> None:
         now = time.time()
@@ -428,7 +479,7 @@ class Printer:
 
     async def reboot(self) -> None:
         """Restart the printer (through Moonraker): the only way to clear its locked camera sessions."""
-        state = derive_state(self.data, self.online)
+        state = self.job_state()
         if state in ("printing", "paused", "processing", "self_test"):
             raise ValueError("cannot restart while printing")
         try:

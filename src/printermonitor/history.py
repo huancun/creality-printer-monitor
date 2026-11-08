@@ -19,7 +19,7 @@ from urllib.parse import quote
 import httpx
 
 from . import printer as printer_mod
-from .printer import HTTP_PORT, Printer, derive_state, relevant_error
+from .printer import HTTP_PORT, Printer, relevant_error
 from .store import Store
 
 log = logging.getLogger(__name__)
@@ -167,7 +167,7 @@ class Tracker:
         if not p.online:
             return  # offline: conclude nothing, the print may still be running
         d = p.data
-        state = derive_state(d, True)
+        state = p.job_state()
         key = self._key(d)
         rec_id = self._open.get(p.id)
         if rec_id is None and (rec := self.store.running_print(p.id)):
