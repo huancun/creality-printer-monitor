@@ -71,15 +71,6 @@ export function printerView(printer) {
       ? "ready"
       : printer.state;
 
-  const colorValues = list("filament_colour").length ? list("filament_colour") : list("filament_color");
-  const profiles = list("filament_settings_id");
-  const types = list("filament_type");
-  const tools = [...text.matchAll(/^\s*T(\d+)\s*$/gim)].map((match) => `T${match[1]}`);
-  const toolIds = [...new Set(tools)];
-  const filamentIds = colorValues.length
-    ? colorValues.map((_, index) => `T1${String.fromCharCode(65 + index)}`)
-    : toolIds;
-
   return {
     id: printer.id,
     name: printer.name,
@@ -218,6 +209,14 @@ export function parseGcodeMeta(text) {
     const match = text.match(new RegExp(`^;\\s*${key}\\s*[=:]\\s*([^\\n]+)`, "mi"));
     return match ? match[1].split(/[;,]/).map((item) => item.trim().replace(/^[\"']|[\"']$/g, "")).filter(Boolean) : [];
   };
+  const colorValues = list("filament_colour").length ? list("filament_colour") : list("filament_color");
+  const profiles = list("filament_settings_id");
+  const types = list("filament_type");
+  const tools = [...text.matchAll(/^\s*T(\d+)\s*$/gim)].map((match) => `T${match[1]}`);
+  const toolIds = [...new Set(tools)];
+  const filamentIds = colorValues.length
+    ? colorValues.map((_, index) => `T1${String.fromCharCode(65 + index)}`)
+    : toolIds;
   let secs = 0;
   for (const [, value, unit] of (t || "").matchAll(/(\d+)\s*([dhms])/g)) {
     secs += Number(value) * { d: 86400, h: 3600, m: 60, s: 1 }[unit];
