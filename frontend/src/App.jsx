@@ -529,7 +529,7 @@ function App() {
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
             <span className="hidden items-center gap-2 rounded-full border border-line bg-panel px-3 py-1.5 text-[10px] text-[#a9afbb] sm:flex"><i className={`h-1.5 w-1.5 rounded-full ${connection === "online" ? "bg-lime shadow-[0_0_8px_#c5f36b]" : connection === "connecting" ? "animate-pulse bg-amber-300" : "bg-red-400"}`} />{connection === "online" ? "服务器在线" : connection === "connecting" ? "正在连接" : "连接中断"}</span>
-            {isAdmin && <button onClick={() => { setSelectedUploadPrinters(printerList.filter((printer) => printer.online && !["printing", "paused", "processing"].includes(printer.state)).map((printer) => printer.id)); setSendOpen(true); }} className="rounded-lg bg-lime px-3.5 py-2 text-[11px] font-semibold text-ink transition hover:bg-[#d5ff80] sm:px-4">＋ <span className="hidden sm:inline">发送文件</span><span className="sm:hidden">上传</span></button>}
+            {isAdmin && <button onClick={() => setActive("文件库")} className="rounded-lg bg-lime px-3.5 py-2 text-[11px] font-semibold text-ink transition hover:bg-[#d5ff80] sm:px-4">＋ <span className="hidden sm:inline">发送文件</span><span className="sm:hidden">上传</span></button>}
             <button aria-label="退出登录" title={`${currentUser} · 退出登录`} onClick={async () => { try { await api("/api/auth/logout", { method: "POST" }); } catch (error) { notify(error.message); } finally { setSession({ checking: false, user: null, setup: false, error: "" }); } }} className="grid h-9 w-9 place-items-center rounded-full border border-[#353b46] bg-[#1a1e26] text-xs font-semibold text-[#d5d9e1]">{currentUser.slice(0, 1)}</button>
           </div>
         </header>

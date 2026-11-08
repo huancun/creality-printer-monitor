@@ -70,6 +70,8 @@ ALLOWED_SET_KEYS = {
     "autohome",
     "cleanErr",  # acknowledge the displayed error
     "repoPlrStatus",  # after a power loss: 1 = resume, 0 = discard
+    "colorMatch",
+    "multiColorPrint",
 }
 
 _SAFE_NAME = re.compile(r"^[\w.\-()+ ]+\.gcode$", re.IGNORECASE)
@@ -387,6 +389,14 @@ class Printer:
     async def print_file(self, name: str) -> None:
         name = check_gcode_name(name)
         await self._send({"method": "set", "params": {"opGcodeFile": f"printprt:{self.gcode_dir()}/{name}"}})
+
+    async def color_match(self, name: str, mapping: list[dict[str, Any]]) -> None:
+        name = check_gcode_name(name)
+        await self.set({"colorMatch": {"path": f"{self.gcode_dir()}/{name}", "list": mapping}})
+
+    async def multi_color_print(self, name: str) -> None:
+        name = check_gcode_name(name)
+        await self.set({"multiColorPrint": {"gcode": f"{self.gcode_dir()}/{name}", "enableSelfTest": 1}})
 
     async def delete_file(self, name: str) -> None:
         name = check_gcode_name(name)

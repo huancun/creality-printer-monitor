@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import {
   api,
   parseGcodeMeta,
+  filamentList,
+  normalizeColor,
   trackJob,
   STATE_LABEL,
   BUSY_STATES,
@@ -30,6 +32,7 @@ function SendCard({ printers, notify }) {
   const [sending, setSending] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [prices, setPrices] = useState(null);
+  const [colorMapping, setColorMapping] = useState([]);
 
   const viewerBoxRef = useRef(null);
   const viewerRef = useRef(null);
@@ -79,6 +82,7 @@ function SendCard({ printers, notify }) {
     setExt(extension);
     setMeta(null);
     setInfo(null);
+    setColorMapping([]);
     setPreview(false);
     setSendJob(null);
     try {
@@ -104,10 +108,13 @@ function SendCard({ printers, notify }) {
     setInfo(null);
     setPreview(false);
     setSendJob(null);
+    setColorMapping([]);
   };
 
   const ready = Boolean(file && ext === "gcode");
   const targetIds = [...targets];
+  const selectedPrinter = printers.find((printer) => printer.id === targetIds[0]);
+  const machineFilaments = selectedPrinter ? filamentList(selectedPrinter.raw.data || {}) : [];
   const sendButtonLabel = !ready
     ? file
       ? "正在读取 G-code…"
@@ -130,6 +137,8 @@ function SendCard({ printers, notify }) {
     fd.append("printers", targetIds.join(","));
     fd.append("start", String(start));
     fd.append("file", file);
+    const selectedColorMapping = colorMapping.filter(Boolean);
+    if (selectedColorMapping.length) fd.append("color_mapping", JSON.stringify(selectedColorMapping));
     setSending(true);
     try {
       let job = await api("/api/send", { method: "POST", body: fd });
@@ -229,6 +238,46 @@ function SendCard({ printers, notify }) {
           )}
           {info?.fitsBed === false && <span className="text-red-300">模型超出热床范围</span>}
         </div>
+
+        {meta?.filaments?.length > 0 && machineFilaments.length > 0 && (
+          <div className="mt-4 rounded-xl border border-line bg-panel/60 p-3">
+            <div className="mb-2">
+              <h3 className="text-xs font-semibold text-white">耗材颜色映射</h3>
+              <p className="mt-1 text-[10px] text-muted">把切片配置映射到 {selectedPrinter?.name || "打印机"} 的 CFS 槽位；发送并开始打印时会同步到机器。</p>
+            </div>
+            <div className="space-y-2">
+              {meta.filaments.map((source, index) => {
+                const mapped = colorMapping[index];
+                const value = mapped ? `${mapped.boxId}:${mapped.materialId}` : "";
+                return (
+                  <label key={`${source.id}-${index}`} className="flex items-center gap-2 text-[10px] text-[#c8ccd4]">
+                    <i className="h-2.5 w-2.5 shrink-0 rounded-full border border-white/30" style={{ backgroundColor: normalizeColor(source.color) || "#888" }} />
+                    <span className="w-16 shrink-0 truncate">{source.id}</span>
+                    <select
+                      value={value}
+                      onChange={(event) => {
+                        const slot = machineFilaments.find((item) => `${item.box}:${item.id}` === event.target.value);
+                        setColorMapping((current) => {
+                          const next = [...current];
+                          next[index] = slot ? { id: source.id, type: source.type || meta.material || "PLA", color: normalizeColor(source.color) || source.color, boxId: slot.box, materialId: slot.id } : null;
+                          return next;
+                        });
+                      }}
+                      className="min-w-0 flex-1 rounded-lg border border-line bg-ink px-2 py-1.5 text-[10px] text-white outline-none focus:border-lime"
+                    >
+                      <option value="">不映射（由机器自动匹配）</option>
+                      {machineFilaments.map((slot) => (
+                        <option key={`${slot.box}:${slot.id}`} value={`${slot.box}:${slot.id}`}>
+                          CFS {slot.box}·{Number(slot.id) + 1} · {slot.name || slot.type || "耗材"}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
       </div>
 

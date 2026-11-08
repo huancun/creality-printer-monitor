@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, mediaUrl, num, prettyName, formatDate, formatDuration, formatGrams, formatHours, formatMoney } from "../api.js";
+import { api, mediaUrl, normalizeColor, num, prettyName, formatDate, formatDuration, formatGrams, formatHours, formatMoney } from "../api.js";
 
 const STATUS_LABEL = { completed: "已完成", running: "进行中", failed: "失败", stopped: "已停止" };
 const STATUS_PILL = {
@@ -44,7 +44,7 @@ function HistoryRow({ row, isAdmin, onDelete, onView, showPrinter }) {
               const grams = row.status === "running" ? filament.estimated_g : filament.grams;
               return (
                 <span key={`${label}-${index}`} className="inline-flex min-w-0 items-center gap-1">
-                  {/^#[0-9a-f]{6}$/i.test(filament.color || "") && <i className="h-2 w-2 shrink-0 rounded-full border border-white/20" style={{ backgroundColor: filament.color }} />}
+                  {normalizeColor(filament.color) && <i className="h-2 w-2 shrink-0 rounded-full border border-white/20" style={{ backgroundColor: normalizeColor(filament.color) }} />}
                   <span className="max-w-[150px] truncate">{label}</span>
                   <span className="shrink-0">{formatGrams(grams)}</span>
                 </span>
@@ -424,7 +424,7 @@ export default function HistoryPage({ printers, isAdmin, notify }) {
                           <tr key={`${item.profile || item.type}-${index}`} className="border-t border-line text-[#c8ccd4]">
                             <td className="max-w-[210px] truncate px-3 py-2.5">
                               <span className="inline-flex items-center gap-2">
-                                {/^#[0-9a-f]{6}$/i.test(item.color || "") && <i className="h-2.5 w-2.5 shrink-0 rounded-full border border-white/20" style={{ backgroundColor: item.color }} />}
+                                {normalizeColor(item.color) && <i className="h-2.5 w-2.5 shrink-0 rounded-full border border-white/20" style={{ backgroundColor: normalizeColor(item.color) }} />}
                                 <span className="truncate">{item.profile || item.type || `耗材 ${index + 1}`}</span>
                               </span>
                             </td>

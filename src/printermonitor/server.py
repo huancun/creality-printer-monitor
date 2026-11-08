@@ -900,6 +900,7 @@ async def api_plug_set(pid: str, body: PlugIn):
 async def api_send(
     printers_ids: str = Form(..., alias="printers"),
     start: bool = Form(False),
+    color_mapping: str | None = Form(None),
     file: UploadFile | None = File(None),
 ):
     """Send an uploaded G-code file to one or more printers."""
@@ -911,6 +912,14 @@ async def api_send(
     name = Path(file.filename or "file.gcode").name
     if Path(name).suffix.lower() != ".gcode":
         raise HTTPException(400, "仅支持上传 .gcode 文件")
+    mapping = []
+    if color_mapping:
+        try:
+            mapping = json.loads(color_mapping)
+        except json.JSONDecodeError as e:
+            raise HTTPException(400, "耗材颜色映射格式无效") from e
+        if not isinstance(mapping, list) or any(not isinstance(item, dict) for item in mapping):
+            raise HTTPException(400, "耗材颜色映射格式无效")
     try:
         name = safe_gcode_name(name)
     except ValueError as e:
@@ -930,6 +939,7 @@ async def api_send(
     job_id = uuid.uuid4().hex[:10]
     jobs[job_id] = {
         "id": job_id, "kind": "send", "file": name, "step": "uploading", "error": None, "start": start,
+        "color_mapping": mapping,
         "targets": {p.id: {"name": p.name, "step": "queued", "error": None} for p in targets},
         "printer": targets[0].id if len(targets) == 1 else None,
     }
@@ -937,12 +947,14 @@ async def api_send(
     return jobs[job_id]
 
 
-async def _send_one(job_id: str, p: Printer, src: Path, name: str, start: bool) -> None:
+async def _send_one(job_id: str, p: Printer, src: Path, name: str, start: bool, mapping: list[dict[str, Any]]) -> None:
     t = jobs[job_id]["targets"][p.id]
     try:
         t["step"] = "uploading"
         set_job(job_id)
         await p.upload(src, name)
+        if mapping:
+            await p.color_match(name, mapping)
         if start:
             t["step"] = "starting"
             set_job(job_id)
@@ -952,7 +964,7 @@ async def _send_one(job_id: str, p: Printer, src: Path, name: str, start: bool) 
                     await p.list_files()  # to find the exact G-code folder
                 except Exception:
                     pass
-            await p.print_file(name)
+                await (p.multi_color_print(name) if mapping else p.print_file(name))
         t["step"] = "done"
     except Exception as e:
         log.exception("upload %s -> %s", name, p.name)
@@ -961,7 +973,8 @@ async def _send_one(job_id: str, p: Printer, src: Path, name: str, start: bool) 
 
 async def _send_job(job_id: str, targets: list[Printer], src: Path, name: str, start: bool, workdir: Path) -> None:
     try:
-        await asyncio.gather(*(_send_one(job_id, p, src, name, start) for p in targets))
+        mapping = jobs[job_id].get("color_mapping") or []
+        await asyncio.gather(*(_send_one(job_id, p, src, name, start, mapping) for p in targets))
         errors_ = [f"{t['name']}: {t['error']}" for t in jobs[job_id]["targets"].values() if t["error"]]
         set_job(job_id, step="error" if errors_ else "done", gcode=name, error="\n".join(errors_) or None)
     finally:

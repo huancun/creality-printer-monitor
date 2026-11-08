@@ -25,6 +25,34 @@ export async function api(path, options = {}) {
   return body;
 }
 
+// Normalize printer/slicer color metadata before it reaches a CSS style.
+// Different firmware and slicer versions use #RRGGBB, RRGGBB, #RGB, or names.
+export function normalizeColor(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const hex = raw.replace(/^#|^0x/i, "");
+  // Creality firmware sometimes prefixes its 6-digit color with a zero
+  // (for example #0ffffff).
+  if (/^0[0-9a-f]{6}$/i.test(hex)) return `#${hex.slice(1)}`;
+  if (/^[0-9a-f]{6}$/i.test(hex)) return `#${hex}`;
+  if (/^[0-9a-f]{3}$/i.test(hex)) {
+    return `#${hex.split("").map((digit) => digit + digit).join("")}`;
+  }
+  const named = {
+    white: "#ffffff",
+    black: "#000000",
+    red: "#ff0000",
+    green: "#008000",
+    blue: "#0000ff",
+    yellow: "#ffff00",
+    orange: "#ffa500",
+    purple: "#800080",
+    gray: "#808080",
+    grey: "#808080",
+  };
+  return named[raw.toLowerCase()] || null;
+}
+
 export function printerView(printer) {
   const data = printer.data || {};
   const progress = Number(data.printProgress ?? data.dProgress ?? 0);
@@ -32,7 +60,7 @@ export function printerView(printer) {
     .flatMap((box) => (box.materials || []).map((material) => ({ box, material })));
   const loaded = materials.find(({ material, box }) => material.selected || box.type === 1);
   const filament = loaded?.material;
-  const colorMatch = String(filament?.color || "").match(/([0-9a-f]{6})$/i);
+  const filamentColor = normalizeColor(filament?.color);
   const colors = ["#b9e572", "#78b8ff", "#e9ad67", "#c5a1ff"];
   const state = !printer.online
     ? "offline"
@@ -56,12 +84,12 @@ export function printerView(printer) {
           : "空闲",
     nozzle: temperature(data.nozzleTemp),
     bed: temperature(data.bedTemp0),
-    color: colorMatch ? `#${colorMatch[1]}` : colors[Number.parseInt(printer.id, 16) % colors.length],
+    color: filamentColor || colors[Number.parseInt(printer.id, 16) % colors.length],
     kind: String(printer.model_code || printer.model || "CREALITY").toUpperCase(),
     online: Boolean(printer.online),
     raw: printer,
     filament: filament
-      ? { name: filament.type || filament.name || "耗材", color: colorMatch ? `#${colorMatch[1]}` : null }
+      ? { name: filament.type || filament.name || "耗材", color: filamentColor }
       : null,
   };
 }
@@ -126,12 +154,12 @@ export function filamentList(data) {
   for (const box of boxes) {
     for (const material of box.materials || []) {
       if (material.state === 0 && box.type !== 1) continue; // empty CFS slot
-      const match = String(material.color || "").match(/([0-9a-f]{6})$/i);
+      const color = normalizeColor(material.color);
       out.push({
         ...material,
         box: box.id,
         external: box.type === 1,
-        color: match ? `#${match[1]}` : "#888888",
+        color: color || "#888888",
       });
     }
   }
@@ -174,6 +202,10 @@ export function parseGcodeMeta(text) {
   };
   const g = find(/^;\s*(?:total )?filament used \[g\]\s*[=:]\s*([\d.]+)/mi);
   const t = find(/^;\s*estimated printing time(?: \(normal mode\))?\s*[=:]\s*([^\n]+)/mi);
+  const list = (key) => {
+    const match = text.match(new RegExp(`^;\\s*${key}\\s*[=:]\\s*([^\\n]+)`, "mi"));
+    return match ? match[1].split(";").map((item) => item.trim()).filter(Boolean) : [];
+  };
   let secs = 0;
   for (const [, value, unit] of (t || "").matchAll(/(\d+)\s*([dhms])/g)) {
     secs += Number(value) * { d: 86400, h: 3600, m: 60, s: 1 }[unit];
@@ -182,6 +214,8 @@ export function parseGcodeMeta(text) {
     filament_g: g ? Number(g) : null,
     est_time_s: secs || null,
     material: find(/^;\s*filament_type\s*[=:]\s*([^\n;]+)/mi),
+    filaments: (list("filament_colour").length ? list("filament_colour") : list("filament_color"))
+      .map((color, index) => ({ id: `T1${String.fromCharCode(65 + index)}`, color })),
   };
 }
 
