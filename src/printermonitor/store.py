@@ -38,7 +38,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         {"id": "nozzle", "name": "更换喷嘴", "hours": 500},
     ],
     # Smart plugs, by printer id:
-    # {"type": "shelly2"|"shelly1"|"tasmota", "host": "192.168.1.50", "auto_off": true, "off_below": 50, "delay_min": 0}
+    # {"type": "shelly2"|"shelly1"|"tasmota"|"xiaomi_miot", "host": "192.168.1.50", "token": "…", "auto_off": true, "off_below": 50, "delay_min": 0}
     "plugs": {},
 }
 
@@ -62,6 +62,8 @@ CREATE TABLE IF NOT EXISTS prints (
     filament_breakdown TEXT,
     cost_filament REAL,
     cost_energy REAL,
+    energy_start_kwh REAL,
+    energy_kwh REAL,
     error_code INTEGER,
     error_title TEXT,
     thumb TEXT,
@@ -122,6 +124,10 @@ class Store:
         columns = {row["name"] for row in self.db.execute("PRAGMA table_info(prints)")}
         if "filament_breakdown" not in columns:
             self.db.execute("ALTER TABLE prints ADD COLUMN filament_breakdown TEXT")
+        if "energy_start_kwh" not in columns:
+            self.db.execute("ALTER TABLE prints ADD COLUMN energy_start_kwh REAL")
+        if "energy_kwh" not in columns:
+            self.db.execute("ALTER TABLE prints ADD COLUMN energy_kwh REAL")
         self.db.commit()
 
     # ---------- settings ----------

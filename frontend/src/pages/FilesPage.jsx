@@ -15,7 +15,7 @@ import { loadViewer } from "../viewerLoader.js";
 import { FilesCard } from "./PrinterDetail.jsx";
 
 const extOf = (name) => String(name).split(".").pop().toLowerCase();
-const SEND_STEP = { queued: "排队中", uploading: "上传中…", starting: "启动中…", done: "完成", error: "失败" };
+const SEND_STEP = { queued: "排队中", powering: "启动打印机…", uploading: "上传中…", starting: "启动打印…", done: "完成", error: "失败" };
 
 function SendCard({ printers, notify }) {
   const [file, setFile] = useState(null);
@@ -32,6 +32,7 @@ function SendCard({ printers, notify }) {
   const [sending, setSending] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [prices, setPrices] = useState(null);
+  const [plugConfigs, setPlugConfigs] = useState({});
   const [colorMapping, setColorMapping] = useState([]);
 
   const viewerBoxRef = useRef(null);
@@ -40,7 +41,10 @@ function SendCard({ printers, notify }) {
   // one-time: prices for the cost estimate (settings are admin-only)
   useEffect(() => {
     api("/api/settings")
-      .then((settings) => setPrices(settings.filaments || {}))
+      .then((settings) => {
+        setPrices(settings.filaments || {});
+        setPlugConfigs(settings.plugs || {});
+      })
       .catch(() => {});
     return () => {
       viewerRef.current?.dispose?.();
@@ -49,17 +53,18 @@ function SendCard({ printers, notify }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // when "start printing" is checked, busy/offline targets get unselected
+  // when "start printing" is checked, busy targets get unselected; an offline
+  // printer with a configured plug can be powered on automatically.
   useEffect(() => {
     if (!start) return;
     setTargets((current) => {
       const next = new Set([...current].filter((id) => {
         const p = printers.find((printer) => printer.id === id);
-        return p && p.online && !BUSY_STATES.includes(p.state);
+        return p && !BUSY_STATES.includes(p.state) && (p.online || plugConfigs[p.id]?.host);
       }));
       return next.size === current.size ? current : next;
     });
-  }, [start, printers]);
+  }, [start, printers, plugConfigs]);
 
   const ensureViewer = async () => {
     const PMViewer = await loadViewer();
@@ -298,7 +303,7 @@ function SendCard({ printers, notify }) {
               <button
                 onClick={() =>
                   setTargets(
-                    new Set(printers.filter((p) => p.online && (!start || !BUSY_STATES.includes(p.state))).map((p) => p.id)),
+                    new Set(printers.filter((p) => (!start ? p.online : !BUSY_STATES.includes(p.state) && (p.online || plugConfigs[p.id]?.host))).map((p) => p.id)),
                   )
                 }
                 className="text-lime hover:underline"
@@ -313,9 +318,12 @@ function SendCard({ printers, notify }) {
           <div className="max-h-[240px] space-y-2 overflow-y-auto pr-1">
             {printers.map((p) => {
               const busy = BUSY_STATES.includes(p.state);
-              const disabled = !p.online || (start && busy);
-              const why = !p.online
-                ? "离线"
+              const canPowerOn = start && Boolean(plugConfigs[p.id]?.host);
+              const disabled = (start ? busy : !p.online) || (!p.online && !canPowerOn);
+              const why = !p.online && canPowerOn
+                ? "离线，开始打印时自动上电"
+                : !p.online
+                  ? "离线"
                 : busy
                   ? `${STATE_LABEL[p.state] || p.state}${p.raw.data?.printLeftTime ? `，${formatDuration(p.raw.data.printLeftTime)} 后可用` : ""}`
                   : STATE_LABEL[p.state] || p.state;

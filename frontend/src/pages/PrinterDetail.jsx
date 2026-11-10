@@ -559,7 +559,7 @@ function PlugCard({ printerId, notify }) {
       <p className="text-[10px] leading-relaxed text-muted">
         {plug.pending ||
           (plug.auto_off
-            ? `打印结束且喷嘴温度低于 ${plug.off_below || 50} °C 后自动断电${plug.delay_min ? `，延迟 ${plug.delay_min} 分钟` : ""}。`
+            ? `打印结束且所有喷嘴温度低于 ${plug.off_below || 50} °C 后自动断电${plug.delay_min ? `，延迟 ${plug.delay_min} 分钟` : ""}。`
             : "自动断电已关闭（可在设置中启用）。")}
       </p>
       <div className="mt-3 flex gap-2">

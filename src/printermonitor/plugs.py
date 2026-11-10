@@ -1,9 +1,10 @@
-"""Smart plugs (Shelly, Tasmota): state, on/off, power off after a print.
+"""Smart plugs (Shelly, Tasmota, Xiaomi): state, on/off, power off after a print.
 
 Local APIs used (no cloud account):
   - Shelly Plus / Pro / Gen3 ("shelly2"): /rpc/Switch.GetStatus?id=0, /rpc/Switch.Set?id=0&on=true
   - Shelly Gen1 ("shelly1"): /relay/0, /relay/0?turn=on
   - Tasmota: /cm?cmnd=Power, /cm?cmnd=Power%20On
+  - Xiaomi Smart Plug 4: local MIoT over UDP/54321
 """
 
 from __future__ import annotations
@@ -14,9 +15,16 @@ from typing import Any, Callable
 
 import httpx
 
+from .xiaomi_miot import XiaomiMiotPlug
+
 log = logging.getLogger(__name__)
 
-TYPES = {"shelly2": "Shelly Plus / Pro / Gen3", "shelly1": "Shelly Gen1", "tasmota": "Tasmota"}
+TYPES = {
+    "shelly2": "Shelly Plus / Pro / Gen3",
+    "shelly1": "Shelly Gen1",
+    "tasmota": "Tasmota",
+    "xiaomi_miot": "小米智能插座 4（xiaomi.plug.04）",
+}
 BUSY = {"printing", "paused", "processing", "self_test"}
 
 
@@ -30,6 +38,8 @@ async def get_state(cfg: dict[str, Any]) -> bool:
         if kind == "tasmota":
             data = (await c.get(f"http://{host}/cm", params={"cmnd": "Power"})).json()
             return str(data.get("POWER", data.get("POWER1", ""))).upper() == "ON"
+    if kind == "xiaomi_miot":
+        return await XiaomiMiotPlug(host, cfg.get("token", "")).state()
     raise ValueError(f"unknown plug type: {kind}")
 
 
@@ -42,18 +52,28 @@ async def set_state(cfg: dict[str, Any], on: bool) -> None:
             r = await c.get(f"http://{host}/relay/0", params={"turn": "on" if on else "off"})
         elif kind == "tasmota":
             r = await c.get(f"http://{host}/cm", params={"cmnd": f"Power {'On' if on else 'Off'}"})
+        elif kind == "xiaomi_miot":
+            await XiaomiMiotPlug(host, cfg.get("token", "")).set_state(on)
+            return
         else:
             raise ValueError(f"unknown plug type: {kind}")
         r.raise_for_status()
+
+
+async def get_energy(cfg: dict[str, Any]) -> dict[str, float | None] | None:
+    """Read metered energy when the configured plug supports it."""
+    if cfg.get("type") != "xiaomi_miot":
+        return None
+    return await XiaomiMiotPlug(cfg["host"], cfg.get("token", "")).energy()
 
 
 class AutoOff:
     """After a print finishes: wait for the nozzle to cool down, then switch the plug off.
     Cancelled if a new print starts in the meantime."""
 
-    def __init__(self, settings: Callable[[], dict[str, Any]], printer_state: Callable[[str], tuple[str, float | None]]):
+    def __init__(self, settings: Callable[[], dict[str, Any]], printer_state: Callable[[str], tuple[str, list[float | None]]]):
         self._settings = settings
-        self._state = printer_state  # id -> (state, nozzle temperature)
+        self._state = printer_state  # id -> (state, all nozzle temperatures)
         self._tasks: dict[str, asyncio.Task] = {}
         self.pending: dict[str, str] = {}  # id -> message shown to the user
 
@@ -74,13 +94,13 @@ class AutoOff:
         try:
             await asyncio.sleep(float(cfg.get("delay_min") or 0) * 60)
             while True:
-                state, nozzle = self._state(printer_id)
+                state, nozzles = self._state(printer_id)
                 if state in BUSY:
                     log.info("%s: power off cancelled, new print started", printer_id)
                     return
-                if nozzle is not None and nozzle < limit:
+                if nozzles and all(temp is not None and temp < limit for temp in nozzles):
                     break
-                self.pending[printer_id] = f"Plug will switch off once the nozzle is below {limit:.0f} °C"
+                self.pending[printer_id] = f"Plug will switch off once all nozzles are below {limit:.0f} °C"
                 await asyncio.sleep(15)
             await set_state(cfg, False)
             log.info("%s: plug switched off after the print", printer_id)

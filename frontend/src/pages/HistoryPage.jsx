@@ -421,6 +421,7 @@ export default function HistoryPage({ printers, isAdmin, notify }) {
             <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
               <div className="rounded-xl border border-line bg-panel p-3"><div className="text-[10px] text-muted">总耗材</div><div className="mt-1 text-sm font-semibold text-white">{formatGrams(selectedPrint.filament_g)}</div></div>
               <div className="rounded-xl border border-line bg-panel p-3"><div className="text-[10px] text-muted">耗材费用</div><div className="mt-1 text-sm font-semibold text-white">{formatMoney(selectedPrint.cost_filament)}</div></div>
+              <div className="rounded-xl border border-line bg-panel p-3"><div className="text-[10px] text-muted">电费</div><div className="mt-1 text-sm font-semibold text-white">{formatMoney(selectedPrint.cost_energy)}</div><div className="mt-1 text-[10px] text-muted">{selectedPrint.energy_kwh != null ? `${Number(selectedPrint.energy_kwh).toFixed(3)} kWh · 插座实测` : "平均功率估算"}</div></div>
               <div className="col-span-2 rounded-xl border border-line bg-panel p-3 sm:col-span-1"><div className="text-[10px] text-muted">总费用（含电费）</div><div className="mt-1 text-sm font-semibold text-white">{formatMoney(rowCost(selectedPrint))}</div></div>
             </div>
 

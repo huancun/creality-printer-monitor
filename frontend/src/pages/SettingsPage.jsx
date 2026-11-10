@@ -244,6 +244,7 @@ export default function SettingsPage({ printers, user, notify }) {
             {
               type: plug.type,
               host: String(plug.host || "").trim(),
+              ...(plug.type === "xiaomi_miot" ? { token: String(plug.token || "").trim() } : {}),
               auto_off: Boolean(plug.auto_off),
               off_below: num(plug.off_below) ?? 50,
               delay_min: num(plug.delay_min) ?? 0,
@@ -466,7 +467,7 @@ export default function SettingsPage({ printers, user, notify }) {
           </Card>
 
           {/* smart plugs */}
-          <Card title="智能插座" hint="支持本地连接的 Shelly 或 Tasmota。自动断电会等待喷嘴冷却；若再次开始打印则取消断电。">
+          <Card title="智能插座" hint="支持本地连接的 Shelly、Tasmota 和小米智能插座 4。自动断电会等待喷嘴冷却；若再次开始打印则取消断电。">
             <div className="space-y-3">
               {printers.map((printer) => {
                 const plug = form.plugs[printer.id] || {};
@@ -504,6 +505,22 @@ export default function SettingsPage({ printers, user, notify }) {
                           }
                         className={`${inputCls} min-w-0 max-w-full disabled:opacity-40`}
                       />
+                      {plug.type === "xiaomi_miot" && (
+                        <input
+                          type="password"
+                          placeholder="小米 token（32 位十六进制）"
+                          value={plug.token || ""}
+                          disabled={!plug.type}
+                          onChange={(event) =>
+                            update((f) => {
+                              const current = f.plugs[printer.id] || { type: "", host: "", token: "", auto_off: false, off_below: 50, delay_min: 0 };
+                              current.token = event.target.value;
+                              f.plugs[printer.id] = current;
+                            })
+                          }
+                          className={`${inputCls} min-w-0 max-w-full disabled:opacity-40`}
+                        />
+                      )}
                     </div>
                     {plug.type && (
                       <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-2 text-[10px] text-[#b8bdc7]">
@@ -523,7 +540,7 @@ export default function SettingsPage({ printers, user, notify }) {
                           打印结束后关闭
                         </label>
                         <label className="flex items-center gap-1.5">
-                          低于
+                          所有喷嘴低于
                           <input
                             type="number"
                             min="30"

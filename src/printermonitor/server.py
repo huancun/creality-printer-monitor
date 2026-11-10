@@ -159,15 +159,36 @@ def on_print_finished(p: Printer, record: dict[str, Any]) -> None:
         autooff.schedule(p.id)
 
 
-def printer_temp_state(pid: str) -> tuple[str, float | None]:
+def printer_temp_state(pid: str) -> tuple[str, list[float | None]]:
     p = printers.get(pid)
     if not p:
-        return "offline", None
-    try:
-        nozzle = float(p.data.get("nozzleTemp"))
-    except (TypeError, ValueError):
-        nozzle = None
-    return derive_state(p.data, p.online), nozzle
+        return "offline", []
+
+    def number(value: Any) -> float | None:
+        try:
+            value = float(value)
+            return value if value == value and abs(value) != float("inf") else None
+        except (TypeError, ValueError):
+            return None
+
+    state = p.data.get("nozzleState")
+    rows = state.get("nozzles") if isinstance(state, dict) else None
+    if isinstance(rows, list) and rows:
+        temperatures = [number(row.get("temperature")) if isinstance(row, dict) else None for row in rows]
+    else:
+        raw = p.data.get("nozzleTemp")
+        if isinstance(raw, (list, tuple)):
+            temperatures = [number(value) for value in raw]
+        else:
+            temperatures = [number(raw)]
+            index = 1
+            while True:
+                value = p.data.get(f"nozzleTemp_{index}", p.data.get(f"nozzleTemp{index}"))
+                if value is None:
+                    break
+                temperatures.append(number(value))
+                index += 1
+    return derive_state(p.data, p.online), temperatures
 
 
 # ---------- MCP server (Claude) on /mcp/ ----------
@@ -538,6 +559,28 @@ class FileIn(BaseModel):
     name: str
 
 
+async def ensure_printer_ready(p: Printer) -> None:
+    """Power on a configured plug and wait for the printer to reconnect."""
+    cfg = store.settings()["plugs"].get(p.id)
+    if not cfg or not cfg.get("host"):
+        if not p.online:
+            raise RuntimeError("打印机当前离线，且未配置可自动上电的插座")
+        return
+    try:
+        if not await plugs.get_state(cfg):
+            await plugs.set_state(cfg, True)
+            log.info("%s: printer plug switched on before printing", p.name)
+    except Exception as e:
+        raise RuntimeError(f"无法自动开启打印机电源：{e}") from e
+    if p.online:
+        return
+    deadline = time.monotonic() + 180
+    while not p.online and time.monotonic() < deadline:
+        await asyncio.sleep(2)
+    if not p.online:
+        raise RuntimeError("插座已开启，但打印机在 180 秒内未上线")
+
+
 @app.get("/api/printers")
 async def api_printers():
     return [snapshot(p) for p in printers.values()]
@@ -668,7 +711,9 @@ async def api_files(pid: str):
 @app.post("/api/printers/{pid}/print")
 async def api_print(pid: str, body: FileIn):
     try:
-        await get_printer(pid).print_file(body.name)
+        p = get_printer(pid)
+        await ensure_printer_ready(p)
+        await p.print_file(body.name)
     except ValueError as e:
         raise HTTPException(400, str(e))
     except RuntimeError as e:
@@ -872,11 +917,13 @@ async def api_plug(pid: str):
     cfg = store.settings()["plugs"].get(pid)
     if not cfg or not cfg.get("host"):
         return {"configured": False}
+    public_cfg = {key: value for key, value in cfg.items() if key != "token"}
+    public_cfg["token_configured"] = bool(cfg.get("token"))
     try:
         on = await plugs.get_state(cfg)
     except Exception as e:
-        return {"configured": True, "reachable": False, "error": str(e) or type(e).__name__, **cfg}
-    return {"configured": True, "reachable": True, "on": on, "pending": autooff.pending.get(pid), **cfg}
+        return {"configured": True, "reachable": False, "error": str(e) or type(e).__name__, **public_cfg}
+    return {"configured": True, "reachable": True, "on": on, "pending": autooff.pending.get(pid), **public_cfg}
 
 
 @app.post("/api/printers/{pid}/plug")
@@ -929,7 +976,11 @@ async def api_send(
         # fresh Moonraker state and only falls back to the printer telemetry;
         # checking p.data directly can reject an actually stopped printer
         # while its older Creality fields still say "processing".
-        busy = [p.name for p in targets if p.job_state() in plugs.BUSY or not p.online]
+        busy = [
+            p.name for p in targets
+            if p.job_state() in plugs.BUSY
+            or (not p.online and not store.settings()["plugs"].get(p.id, {}).get("host"))
+        ]
         if busy:
             raise HTTPException(409, f"以下打印机当前不可用：{', '.join(busy)}")
     workdir = Path(tempfile.mkdtemp(prefix="pm-send-"))
@@ -954,6 +1005,10 @@ async def api_send(
 async def _send_one(job_id: str, p: Printer, src: Path, name: str, start: bool, mapping: list[dict[str, Any]]) -> None:
     t = jobs[job_id]["targets"][p.id]
     try:
+        if start:
+            t["step"] = "powering"
+            set_job(job_id)
+            await ensure_printer_ready(p)
         t["step"] = "uploading"
         set_job(job_id)
         await p.upload(src, name)

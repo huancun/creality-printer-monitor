@@ -21,6 +21,7 @@ import httpx
 from . import printer as printer_mod
 from .printer import HTTP_PORT, Printer, relevant_error
 from .store import Store
+from .plugs import get_energy
 
 log = logging.getLogger(__name__)
 
@@ -162,6 +163,21 @@ class Tracker:
         self._last: dict[str, dict[str, Any]] = {}  # last values seen during the print
         self._closed: dict[str, dict[str, Any]] = {}  # last closed print, for stale telemetry
 
+    def _meter(self, p: Printer, rec_id: int) -> None:
+        cfg = self.store.settings()["plugs"].get(p.id)
+        if not cfg or cfg.get("type") != "xiaomi_miot" or not cfg.get("token"):
+            return
+        asyncio.ensure_future(self._capture_energy(p, rec_id, cfg))
+
+    async def _capture_energy(self, p: Printer, rec_id: int, cfg: dict[str, Any]) -> None:
+        try:
+            reading = await get_energy(cfg)
+            if reading.get("energy_kwh") is not None:
+                self.store.update_print(rec_id, energy_start_kwh=reading["energy_kwh"])
+                log.debug("%s: energy baseline for print #%d: %.3f kWh", p.name, rec_id, reading["energy_kwh"])
+        except Exception as e:
+            log.debug("%s: energy baseline unavailable: %s", p.name, e)
+
     # ---------- tracking ----------
     def update(self, p: Printer) -> None:
         if not p.online:
@@ -266,6 +282,7 @@ class Tracker:
         self._remember(p)
         log.info("%s: print of %s recorded (#%d)", p.name, file, rec_id)
         asyncio.ensure_future(self._enrich(p, rec_id, file))
+        self._meter(p, rec_id)
 
     def _save_progress(self, p: Printer, rec_id: int) -> None:
         now = time.monotonic()
@@ -305,6 +322,7 @@ class Tracker:
         if status != "completed" and (err := last.get("error")):
             fields["error_code"], fields["error_title"] = err["code"], err["title"]
         self.store.update_print(rec_id, **fields)
+        self._meter_finish(p, rec_id, settings)
         self._closed[p.id] = {
             "file": rec.get("file"),
             "closed_at": time.monotonic(),
@@ -328,8 +346,36 @@ class Tracker:
         )
         return {
             "cost_filament": round(filament_cost, 3),
-            "cost_energy": round(fields["duration_s"] / 3600 * energy["power_w"] / 1000 * energy["price_kwh"], 3),
+            "cost_energy": round(
+                (fields.get("energy_kwh") if fields.get("energy_kwh") is not None else
+                 fields["duration_s"] / 3600 * energy["power_w"] / 1000) * energy["price_kwh"],
+                3,
+            ),
         }
+
+    def _meter_finish(self, p: Printer, rec_id: int, settings: dict[str, Any]) -> None:
+        cfg = settings["plugs"].get(p.id)
+        if not cfg or cfg.get("type") != "xiaomi_miot" or not cfg.get("token"):
+            return
+        asyncio.ensure_future(self._capture_energy_end(p, rec_id, cfg))
+
+    async def _capture_energy_end(self, p: Printer, rec_id: int, cfg: dict[str, Any]) -> None:
+        try:
+            reading = await get_energy(cfg)
+            end = reading.get("energy_kwh")
+            rec = self.store.get_print(rec_id) or {}
+            start = rec.get("energy_start_kwh")
+            if end is None or start is None:
+                return
+            used = float(end) - float(start)
+            if used < 0 or used > 1000:
+                log.warning("%s: invalid metered energy delta for print #%d: %.3f kWh", p.name, rec_id, used)
+                return
+            price = float(self.store.settings()["energy"].get("price_kwh") or 0)
+            self.store.update_print(rec_id, energy_kwh=round(used, 6), cost_energy=round(used * price, 3))
+            log.info("%s: print #%d used %.3f kWh (metered)", p.name, rec_id, used)
+        except Exception as e:
+            log.debug("%s: final energy reading unavailable: %s", p.name, e)
 
     def recompute_costs(self) -> None:
         """After a price change: recompute the whole history."""
