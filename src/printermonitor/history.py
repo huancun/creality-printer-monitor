@@ -162,12 +162,14 @@ class Tracker:
         self._last_save: dict[str, float] = {}
         self._last: dict[str, dict[str, Any]] = {}  # last values seen during the print
         self._closed: dict[str, dict[str, Any]] = {}  # last closed print, for stale telemetry
+        self._energy_tasks: dict[int, asyncio.Task] = {}
 
     def _meter(self, p: Printer, rec_id: int) -> None:
         cfg = self.store.settings()["plugs"].get(p.id)
         if not cfg or cfg.get("type") != "xiaomi_miot" or not cfg.get("token"):
             return
-        asyncio.ensure_future(self._capture_energy(p, rec_id, cfg))
+        task = asyncio.ensure_future(self._capture_energy(p, rec_id, cfg))
+        self._energy_tasks[rec_id] = task
 
     async def _capture_energy(self, p: Printer, rec_id: int, cfg: dict[str, Any]) -> None:
         try:
@@ -361,6 +363,10 @@ class Tracker:
 
     async def _capture_energy_end(self, p: Printer, rec_id: int, cfg: dict[str, Any]) -> None:
         try:
+            # The start and end reads can be scheduled very close together for
+            # short jobs. Always finish the baseline read before using it.
+            if task := self._energy_tasks.get(rec_id):
+                await task
             reading = await get_energy(cfg)
             end = reading.get("energy_kwh")
             rec = self.store.get_print(rec_id) or {}
@@ -371,11 +377,28 @@ class Tracker:
             if used < 0 or used > 1000:
                 log.warning("%s: invalid metered energy delta for print #%d: %.3f kWh", p.name, rec_id, used)
                 return
-            price = float(self.store.settings()["energy"].get("price_kwh") or 0)
+            settings = self.store.settings()
+            configured_w = float(settings["energy"].get("power_w") or 0)
+            duration_s = float(rec.get("duration_s") or 0)
+            measured_w = float(reading.get("power_w") or 0)
+            # A printer cannot plausibly consume 1 kWh in a short job when its
+            # configured/observed power is only a few hundred watts. Treat a
+            # counter jump as invalid and retain the normal estimate.
+            plausible_w = max(configured_w, measured_w, 300.0)
+            maximum = max(duration_s / 3600 * plausible_w / 1000 * 3, 0.1)
+            if used > maximum:
+                log.warning(
+                    "%s: rejecting implausible metered energy for print #%d: %.3f kWh (limit %.3f)",
+                    p.name, rec_id, used, maximum,
+                )
+                return
+            price = float(settings["energy"].get("price_kwh") or 0)
             self.store.update_print(rec_id, energy_kwh=round(used, 6), cost_energy=round(used * price, 3))
             log.info("%s: print #%d used %.3f kWh (metered)", p.name, rec_id, used)
         except Exception as e:
             log.debug("%s: final energy reading unavailable: %s", p.name, e)
+        finally:
+            self._energy_tasks.pop(rec_id, None)
 
     def recompute_costs(self) -> None:
         """After a price change: recompute the whole history."""

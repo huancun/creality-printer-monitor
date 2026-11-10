@@ -185,8 +185,8 @@ class Printer:
         Moonraker can briefly report ``standby`` while the Creality telemetry
         already contains the active file and a printing state (notably just
         after a remote start).  In that conflict, the active Creality state is
-        the stronger signal; otherwise a fresh Moonraker state clears stale
-        Creality print fields as before.
+        the stronger signal. A fresh ``cancelled`` state is authoritative, so
+        it clears stale Creality print fields immediately.
         """
         telemetry_state = derive_state(self.data, self.online)
         if self._moonraker_state and time.monotonic() - self._moonraker_state_at <= MOONRAKER_STATE_TTL:
@@ -201,6 +201,8 @@ class Printer:
                 "startup": "processing",
             }.get(self._moonraker_state)
             if mapped:
+                if self._moonraker_state == "cancelled":
+                    return "stopped"
                 if mapped in ("idle", "stopped") and telemetry_state in ("printing", "processing", "paused", "self_test"):
                     return telemetry_state
                 return mapped

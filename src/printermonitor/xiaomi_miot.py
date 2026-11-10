@@ -62,6 +62,7 @@ class XiaomiMiotPlug:
     SWITCH_ON = {"did": "switch:on", "siid": 2, "piid": 1}
     ENERGY_KWH = {"did": "power-consumption", "siid": 11, "piid": 1}
     POWER_W = {"did": "electric-power", "siid": 11, "piid": 2}
+    ENERGY_STEP_KWH = 0.01
 
     def __init__(self, host: str, token: str, timeout: float = 4) -> None:
         try:
@@ -154,7 +155,9 @@ class XiaomiMiotPlug:
             if isinstance(item, dict) and item.get("code", 0) == 0
         }
         try:
-            energy = float(values[1]) if values.get(1) is not None else None
+            raw_energy = float(values[1]) if values.get(1) is not None else None
+            # xiaomi.plug.04 declares a 0.01 kWh step for this property.
+            energy = raw_energy * self.ENERGY_STEP_KWH if raw_energy is not None else None
         except (TypeError, ValueError):
             energy = None
         try:
