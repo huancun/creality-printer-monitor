@@ -27,6 +27,7 @@ log = logging.getLogger(__name__)
 
 ACTIVE = {"printing", "paused", "processing", "self_test"}
 SAVE_EVERY = 60  # s: duration/progress of running prints saved to the database
+ENERGY_SAMPLE_EVERY = 15  # s: sample instantaneous plug power while printing
 STALE_ACTIVE_WINDOW = 45  # s: ignore a late active report after a print has ended
 FILAMENT_DIAMETER = 1.75
 
@@ -162,23 +163,65 @@ class Tracker:
         self._last_save: dict[str, float] = {}
         self._last: dict[str, dict[str, Any]] = {}  # last values seen during the print
         self._closed: dict[str, dict[str, Any]] = {}  # last closed print, for stale telemetry
-        self._energy_tasks: dict[int, asyncio.Task] = {}
+        self._energy_sessions: dict[int, dict[str, Any]] = {}
 
     def _meter(self, p: Printer, rec_id: int) -> None:
         cfg = self.store.settings()["plugs"].get(p.id)
         if not cfg or cfg.get("type") != "xiaomi_miot" or not cfg.get("token"):
             return
-        task = asyncio.ensure_future(self._capture_energy(p, rec_id, cfg))
-        self._energy_tasks[rec_id] = task
+        stop = asyncio.Event()
+        session: dict[str, Any] = {
+            "stop": stop,
+            "integrated_kwh": 0.0,
+            "last_at": None,
+            "last_power_w": None,
+            "last_energy_kwh": None,
+        }
+        session["task"] = asyncio.ensure_future(self._sample_energy(p, rec_id, cfg, session))
+        self._energy_sessions[rec_id] = session
 
-    async def _capture_energy(self, p: Printer, rec_id: int, cfg: dict[str, Any]) -> None:
+    async def _sample_energy(
+        self, p: Printer, rec_id: int, cfg: dict[str, Any], session: dict[str, Any]
+    ) -> None:
+        """Integrate instantaneous plug power during one print."""
         try:
-            reading = await get_energy(cfg)
-            if reading.get("energy_kwh") is not None:
-                self.store.update_print(rec_id, energy_start_kwh=reading["energy_kwh"])
-                log.debug("%s: energy baseline for print #%d: %.3f kWh", p.name, rec_id, reading["energy_kwh"])
+            while True:
+                try:
+                    reading = await get_energy(cfg)
+                    now = time.monotonic()
+                    energy = reading.get("energy_kwh") if reading else None
+                    power = reading.get("power_w") if reading else None
+                    if energy is not None:
+                        session["last_energy_kwh"] = float(energy)
+                        if session["last_at"] is None:
+                            self.store.update_print(rec_id, energy_start_kwh=float(energy))
+                            log.debug("%s: energy baseline for print #%d: %.3f kWh", p.name, rec_id, energy)
+                    if power is not None:
+                        power = max(0.0, float(power))
+                        previous_at = session["last_at"]
+                        previous_power = session["last_power_w"]
+                        if previous_at is not None and previous_power is not None:
+                            elapsed = now - previous_at
+                            # Do not turn a long network outage into a large phantom
+                            # energy value. The next successful reading starts a new span.
+                            if 0 < elapsed <= ENERGY_SAMPLE_EVERY * 3:
+                                session["integrated_kwh"] += (
+                                    (previous_power + power) / 2 * elapsed / 3_600_000
+                                )
+                        session["last_at"] = now
+                        session["last_power_w"] = power
+                except Exception as e:
+                    log.debug("%s: energy sample unavailable for print #%d: %s", p.name, rec_id, e)
+                if session["stop"].is_set():
+                    return
+                try:
+                    await asyncio.wait_for(session["stop"].wait(), ENERGY_SAMPLE_EVERY)
+                except asyncio.TimeoutError:
+                    continue
         except Exception as e:
-            log.debug("%s: energy baseline unavailable: %s", p.name, e)
+            log.debug("%s: energy sampling unavailable for print #%d: %s", p.name, rec_id, e)
+        finally:
+            self._energy_sessions.pop(rec_id, None)
 
     # ---------- tracking ----------
     def update(self, p: Printer) -> None:
@@ -359,28 +402,37 @@ class Tracker:
         cfg = settings["plugs"].get(p.id)
         if not cfg or cfg.get("type") != "xiaomi_miot" or not cfg.get("token"):
             return
-        asyncio.ensure_future(self._capture_energy_end(p, rec_id, cfg))
+        asyncio.ensure_future(self._finish_energy(p, rec_id, cfg, settings))
 
-    async def _capture_energy_end(self, p: Printer, rec_id: int, cfg: dict[str, Any]) -> None:
+    async def _finish_energy(
+        self, p: Printer, rec_id: int, cfg: dict[str, Any], settings: dict[str, Any]
+    ) -> None:
         try:
-            # The start and end reads can be scheduled very close together for
-            # short jobs. Always finish the baseline read before using it.
-            if task := self._energy_tasks.get(rec_id):
-                await task
-            reading = await get_energy(cfg)
-            end = reading.get("energy_kwh")
+            session = self._energy_sessions.get(rec_id)
+            if session:
+                session["stop"].set()
+                await session["task"]
+                integrated = float(session.get("integrated_kwh") or 0)
+                end = session.get("last_energy_kwh")
+            else:
+                reading = await get_energy(cfg)
+                integrated = 0.0
+                end = reading.get("energy_kwh") if reading else None
             rec = self.store.get_print(rec_id) or {}
             start = rec.get("energy_start_kwh")
-            if end is None or start is None:
+            used = integrated
+            source = "power samples"
+            if used <= 0 and end is not None and start is not None:
+                used = float(end) - float(start)
+                source = "meter counter"
+            if used <= 0:
                 return
-            used = float(end) - float(start)
             if used < 0 or used > 1000:
                 log.warning("%s: invalid metered energy delta for print #%d: %.3f kWh", p.name, rec_id, used)
                 return
-            settings = self.store.settings()
             configured_w = float(settings["energy"].get("power_w") or 0)
             duration_s = float(rec.get("duration_s") or 0)
-            measured_w = float(reading.get("power_w") or 0)
+            measured_w = float(session.get("last_power_w") or 0) if session else 0
             # A printer cannot plausibly consume 1 kWh in a short job when its
             # configured/observed power is only a few hundred watts. Treat a
             # counter jump as invalid and retain the normal estimate.
@@ -394,11 +446,9 @@ class Tracker:
                 return
             price = float(settings["energy"].get("price_kwh") or 0)
             self.store.update_print(rec_id, energy_kwh=round(used, 6), cost_energy=round(used * price, 3))
-            log.info("%s: print #%d used %.3f kWh (metered)", p.name, rec_id, used)
+            log.info("%s: print #%d used %.3f kWh (%s)", p.name, rec_id, used, source)
         except Exception as e:
             log.debug("%s: final energy reading unavailable: %s", p.name, e)
-        finally:
-            self._energy_tasks.pop(rec_id, None)
 
     def recompute_costs(self) -> None:
         """After a price change: recompute the whole history."""
